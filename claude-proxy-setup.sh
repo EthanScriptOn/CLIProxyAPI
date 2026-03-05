@@ -85,6 +85,13 @@ logs-max-total-size-mb: 1000
 request-retry: 3
 max-retry-credentials: 2
 max-retry-interval: 30
+
+remote-management:
+  allow-remote: true
+  secret-key: "\$2y\$10\$kVqNL6TpN/WuqiSR8sJiFOpHac1Vy5s/tEYN2j.wIVlPW5US.nkAu"
+  disable-control-panel: false
+
+usage-statistics-enabled: true
 EOF
 
 # ==============================
