@@ -42,7 +42,8 @@ log_step "构建前端..."
 cd "${PROJECT_DIR}/frontend"
 npm install --silent
 npm run build --silent
-cp "${PROJECT_DIR}/frontend/dist/"*.html "${PROJECT_DIR}/static/"
+cp "${PROJECT_DIR}/frontend/dist/index.html" "${PROJECT_DIR}/static/index.html"
+cp "${PROJECT_DIR}/frontend/dist/index.html" "${PROJECT_DIR}/static/management.html"
 log_success "前端构建完成，已同步到 static/"
 
 # ==============================
