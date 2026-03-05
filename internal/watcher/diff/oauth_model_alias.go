@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"proxycore/api/v6/internal/config"
 )
 
 type OAuthModelAliasSummary struct {

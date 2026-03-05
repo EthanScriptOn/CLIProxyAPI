@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	configaccess "github.com/router-for-me/CLIProxyAPI/v6/internal/access/config_access"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
+	configaccess "proxycore/api/v6/internal/access/config_access"
+	"proxycore/api/v6/internal/config"
+	sdkaccess "proxycore/api/v6/sdk/access"
 	log "github.com/sirupsen/logrus"
 )
 

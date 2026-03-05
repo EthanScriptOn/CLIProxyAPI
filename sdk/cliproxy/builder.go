@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	configaccess "github.com/router-for-me/CLIProxyAPI/v6/internal/access/config_access"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
-	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	configaccess "proxycore/api/v6/internal/access/config_access"
+	"proxycore/api/v6/internal/api"
+	sdkaccess "proxycore/api/v6/sdk/access"
+	sdkAuth "proxycore/api/v6/sdk/auth"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
+	"proxycore/api/v6/sdk/config"
 )
 
 // Builder constructs a Service instance with customizable providers.

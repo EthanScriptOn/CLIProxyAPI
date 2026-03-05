@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
+	"proxycore/api/v6/internal/misc"
 )
 
 // KimiTokenStorage stores OAuth2 token information for Kimi API authentication.

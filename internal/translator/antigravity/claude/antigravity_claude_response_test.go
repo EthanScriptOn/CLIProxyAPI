@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/cache"
+	"proxycore/api/v6/internal/cache"
 )
 
 // ============================================================================

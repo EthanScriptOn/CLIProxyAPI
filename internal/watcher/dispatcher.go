@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"proxycore/api/v6/internal/config"
+	"proxycore/api/v6/internal/watcher/synthesizer"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 )
 
 func (w *Watcher) setAuthUpdateQueue(queue chan<- AuthUpdate) {

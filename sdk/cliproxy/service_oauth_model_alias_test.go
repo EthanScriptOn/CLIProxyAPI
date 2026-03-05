@@ -3,7 +3,7 @@ package cliproxy
 import (
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	"proxycore/api/v6/sdk/config"
 )
 
 func TestApplyOAuthModelAlias_Rename(t *testing.T) {

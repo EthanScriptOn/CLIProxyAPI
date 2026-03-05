@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/router-for-me/CLIProxyAPI/v6/internal/translator/gemini/openai/chat-completions"
+	. "proxycore/api/v6/internal/translator/gemini/openai/chat-completions"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"

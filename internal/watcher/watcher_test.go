@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/diff"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"proxycore/api/v6/internal/config"
+	"proxycore/api/v6/internal/watcher/diff"
+	"proxycore/api/v6/internal/watcher/synthesizer"
+	sdkAuth "proxycore/api/v6/sdk/auth"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 	"gopkg.in/yaml.v3"
 )
 

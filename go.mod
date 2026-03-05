@@ -1,4 +1,4 @@
-module github.com/router-for-me/CLIProxyAPI/v6
+module proxycore/api/v6
 
 go 1.26.0
 

@@ -1,12 +1,12 @@
 package executor
 
 import (
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/antigravity"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/claude"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/codex"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/gemini"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/geminicli"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/iflow"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/kimi"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/thinking/provider/openai"
+	_ "proxycore/api/v6/internal/thinking/provider/antigravity"
+	_ "proxycore/api/v6/internal/thinking/provider/claude"
+	_ "proxycore/api/v6/internal/thinking/provider/codex"
+	_ "proxycore/api/v6/internal/thinking/provider/gemini"
+	_ "proxycore/api/v6/internal/thinking/provider/geminicli"
+	_ "proxycore/api/v6/internal/thinking/provider/iflow"
+	_ "proxycore/api/v6/internal/thinking/provider/kimi"
+	_ "proxycore/api/v6/internal/thinking/provider/openai"
 )

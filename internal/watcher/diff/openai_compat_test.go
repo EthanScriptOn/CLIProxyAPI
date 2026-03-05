@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"proxycore/api/v6/internal/config"
 )
 
 func TestDiffOpenAICompatibility(t *testing.T) {

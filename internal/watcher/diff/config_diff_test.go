@@ -3,8 +3,8 @@ package diff
 import (
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	"proxycore/api/v6/internal/config"
+	sdkconfig "proxycore/api/v6/sdk/config"
 )
 
 func TestBuildConfigChangeDetails(t *testing.T) {

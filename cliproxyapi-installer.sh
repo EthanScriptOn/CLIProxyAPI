@@ -1,16 +1,14 @@
 #!/bin/bash
 
-# CLIProxyAPI Linux Installer
-# Linux-specific script that installs, upgrades, and manages CLIProxyAPI
-# Downloads, installs, and upgrades CLIProxyAPI while preserving configuration
+# Proxy Server Linux Installer
+# Linux-specific script that installs, upgrades, and manages the proxy server
+# Reads the release package from PACKAGE_DIR and installs it locally
 
 set -euo pipefail
 
 # Configuration
-REPO_OWNER="router-for-me"
-REPO_NAME="CLIProxyAPI"
 INSTALL_DIR="$HOME/cliproxyapi"
-API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+PACKAGE_DIR="${CLI_PROXY_DIR:-/root/cliproxyapi}"   # 包所在目录，由 claude-proxy-setup.sh 传入或默认
 SCRIPT_NAME="cliproxyapi-installer"
 
 # Colors for output
@@ -47,10 +45,6 @@ show_authentication_info() {
     echo
     echo -e "${YELLOW}🔐 IMPORTANT: Authentication Setup Required${NC}"
     echo
-    echo -e "${BLUE}CLIProxyAPI supports authentication for multiple providers:${NC}"
-    echo
-    echo -e "${GREEN}📚 Full Documentation:${NC} https://github.com/router-for-me/CLIProxyAPI"
-    echo
     echo -e "${YELLOW}Authentication Commands:${NC}"
     echo
     echo -e "${GREEN}Gemini (Google):${NC}"
@@ -66,7 +60,7 @@ show_authentication_info() {
     echo "  ./cli-proxy-api --claude-login"
     echo "  (OAuth callback on port 54545)"
     echo
-    echo -e "${GREEN}Qwen (Qwen Chat):${NC}"
+    echo -e "${GREEN}Qwen:${NC}"
     echo "  ./cli-proxy-api --qwen-login"
     echo "  (Uses OAuth device flow)"
     echo
@@ -81,142 +75,27 @@ show_authentication_info() {
 
 # Generate OpenAI-format API key
 generate_api_key() {
-    # OpenAI API keys follow the format: sk-... (48 characters total)
-    # Generate 48-character random string starting with "sk-"
     local prefix="sk-"
     local chars="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     local key=""
-    
-    # Generate 45 random characters (48 - 3 for "sk-")
     for i in {1..45}; do
         key="${key}${chars:$((RANDOM % ${#chars})):1}"
     done
-    
     echo "${prefix}${key}"
-}
-
-# Manage documentation intelligently
-manage_documentation() {
-    echo "Documentation Management"
-    echo "========================"
-
-    if ! is_installed; then
-        log_error "CLIProxyAPI is not installed. Install it first to manage documentation."
-        exit 1
-    fi
-
-    local version_dir
-    version_dir=$(get_current_version_dir)
-    local readme_file="${version_dir}/README.md"
-    local install_readme="${INSTALL_DIR}/README.md"
-
-    echo "📚 Documentation Status:"
-    echo
-
-    # Check for README files
-    if [[ -f "$readme_file" ]]; then
-        echo "✅ Project README: Found ($readme_file)"
-    else
-        echo "❌ Project README: Missing"
-    fi
-
-    if [[ -f "$install_readme" ]]; then
-        echo "✅ Installer README: Found ($install_readme)"
-    else
-        echo "❌ Installer README: Missing"
-    fi
-
-    # Check version consistency
-    local current_version
-    current_version=$(get_current_version)
-    echo
-    echo "🔄 Version Consistency Check:"
-
-    if [[ -f "$readme_file" ]] && grep -q "$current_version" "$readme_file"; then
-        echo "✅ Project README: Version $current_version referenced"
-    else
-        echo "⚠️  Project README: Version $current_version not found or outdated"
-    fi
-
-    if [[ -f "$install_readme" ]] && grep -q "$current_version" "$install_readme"; then
-        echo "✅ Installer README: Version $current_version referenced"
-    else
-        echo "⚠️  Installer README: Version $current_version not found or outdated"
-    fi
-
-    # Check for common documentation issues
-    echo
-    echo "🔍 Documentation Quality Check:"
-
-    local issues_found=0
-
-    # Check for broken links (basic check)
-    if [[ -f "$install_readme" ]]; then
-        if grep -q "https://" "$install_readme"; then
-            echo "✅ External links: Present"
-        else
-            echo "ℹ️  External links: None found"
-        fi
-    fi
-
-    # Check for TODO items or placeholders
-    if [[ -f "$install_readme" ]] && grep -q -i "todo\|placeholder\|your-repo" "$install_readme"; then
-        echo "⚠️  Placeholders found: Update repository URLs and TODO items"
-        ((issues_found++))
-    fi
-
-    # Check for consistent formatting
-    if [[ -f "$install_readme" ]]; then
-        local header_count=$(grep -c "^#" "$install_readme")
-        echo "📊 Headers found: $header_count"
-
-        if [[ $header_count -lt 5 ]]; then
-            echo "⚠️  Documentation structure: May need more sections"
-            ((issues_found++))
-        fi
-    fi
-
-    # Provide recommendations
-    echo
-    echo "💡 Recommendations:"
-
-    if [[ ! -f "$install_readme" ]]; then
-        echo "• Create installer README.md with usage instructions"
-    fi
-
-    if [[ $issues_found -gt 0 ]]; then
-        echo "• Review and update $issues_found documentation issues"
-    fi
-
-    echo "• Ensure version numbers are current ($current_version)"
-    echo "• Update repository URLs if changed"
-    echo "• Add cross-references between documents"
-
-    echo
-    echo "📖 Quick Documentation Tasks:"
-    echo "• View project docs: cat $readme_file"
-    echo "• View installer docs: cat $install_readme"
-    echo "• Edit installer docs: nano $install_readme"
 }
 
 # Check if API keys are configured
 check_api_keys() {
     local config_file="${INSTALL_DIR}/config.yaml"
-
     if [[ ! -f "$config_file" ]]; then
         return 1
     fi
-
-    # Check for default/placeholder API keys
     if grep -q '"your-api-key-1"' "$config_file" || grep -q '"your-api-key-2"' "$config_file"; then
         return 1
     fi
-
-    # Check if api-keys section exists and has non-empty values that look like real API keys
     if grep -A 10 "^api-keys:" "$config_file" | grep -v "^#" | grep -v "^api-keys:" | grep -q '"sk-[^"]*"'; then
         return 0
     fi
-
     return 1
 }
 
@@ -225,30 +104,10 @@ show_api_key_setup() {
     echo
     echo -e "${YELLOW}🔑 IMPORTANT: API Keys Required Before First Run${NC}"
     echo
-    echo -e "${BLUE}Before starting CLIProxyAPI, you need to configure API keys in config.yaml:${NC}"
-    echo
     echo -e "${GREEN}1. Edit the configuration file:${NC}"
     echo -e "   ${CYAN}nano ${INSTALL_DIR}/config.yaml${NC}"
     echo
-    echo -e "${GREEN}2. Find the 'api-keys' section and replace placeholder keys:${NC}"
-    echo
-    echo -e "   ${YELLOW}# Replace this:${NC}"
-    echo -e "   ${YELLOW}api-keys:${NC}"
-    echo -e "   ${YELLOW}  - \"your-api-key-1\"${NC}"
-    echo -e "   ${YELLOW}  - \"your-api-key-2\"${NC}"
-    echo
-    echo -e "   ${GREEN}# With your actual API keys:${NC}"
-    echo -e "   ${GREEN}api-keys:${NC}"
-    echo -e "   ${GREEN}  - \"sk-your-real-openai-key-here\"${NC}"
-    echo -e "   ${GREEN}  - \"your-custom-secure-key-12345\"${NC}"
-    echo
-    echo -e "${GREEN}3. Save the file (Ctrl+X, then Y, then Enter in nano)${NC}"
-    echo
-    echo -e "${BLUE}💡 Tips:${NC}"
-    echo -e "   • Use strong, unique keys for security"
-    echo -e "   • You can add multiple keys for different users/services"
-    echo -e "   • Keys are used for authenticating requests to your proxy"
-    echo -e "   • These are NOT your provider API keys (those are set via login commands)"
+    echo -e "${GREEN}2. Find the 'api-keys' section and replace placeholder keys${NC}"
     echo
 }
 
@@ -257,72 +116,38 @@ show_quick_start() {
     local install_dir="$1"
     echo
     echo -e "${GREEN}🚀 Quick Start Guide:${NC}"
-    echo -e "${BLUE}1. Navigate to CLIProxyAPI:${NC}"
+    echo -e "${BLUE}1. Navigate to install directory:${NC}"
     echo -e "   ${CYAN}cd $install_dir${NC}"
     echo
-    
-    # Check if API keys are configured
     if ! check_api_keys; then
         show_api_key_setup
         echo -e "${BLUE}2. Set up authentication (choose one or more):${NC}"
     else
         echo -e "${BLUE}2. Set up authentication (choose one or more):${NC}"
     fi
-
     echo -e "   ${CYAN}./cli-proxy-api --login${NC}           # For Gemini"
     echo -e "   ${CYAN}./cli-proxy-api --codex-login${NC}     # For OpenAI"
     echo -e "   ${CYAN}./cli-proxy-api --claude-login${NC}    # For Claude"
     echo -e "   ${CYAN}./cli-proxy-api --qwen-login${NC}      # For Qwen"
     echo -e "   ${CYAN}./cli-proxy-api --iflow-login${NC}     # For iFlow"
     echo
-
-    if check_api_keys; then
-        echo -e "${BLUE}Your API keys:${NC}"
-        grep -A 10 "^api-keys:" "${install_dir}/config.yaml" | grep -v "^#" | head -10
-        echo
-    fi
-
-    if ! check_api_keys; then
-        echo -e "${BLUE}3. Configure API keys (REQUIRED):${NC}"
-        echo -e "   ${CYAN}nano config.yaml${NC}              # Edit API keys"
-        echo
-        echo -e "${BLUE}4. Start the service:${NC}"
-        echo -e "   ${CYAN}./cli-proxy-api${NC}"
-        echo
-        echo -e "${BLUE}5. Or run as a systemd service:${NC}"
-        echo -e "   ${CYAN}systemctl --user enable cliproxyapi.service${NC}"
-        echo -e "   ${CYAN}systemctl --user start cliproxyapi.service${NC}"
-        echo -e "   ${CYAN}systemctl --user status cliproxyapi.service${NC}"
-        echo
-        echo -e "${BLUE}6. Read the full documentation:${NC}"
-        echo -e "   ${CYAN}https://github.com/router-for-me/CLIProxyAPI${NC}"
-    else
-        echo -e "${BLUE}3. Start the service:${NC}"
-        echo -e "   ${CYAN}./cli-proxy-api${NC}"
-        echo
-        echo -e "${BLUE}4. Or run as a systemd service:${NC}"
-        echo -e "   ${CYAN}systemctl --user enable cliproxyapi.service${NC}"
-        echo -e "   ${CYAN}systemctl --user start cliproxyapi.service${NC}"
-        echo -e "   ${CYAN}systemctl --user status cliproxyapi.service${NC}"
-        echo
-        echo -e "${BLUE}5. Read the full documentation:${NC}"
-        echo -e "   ${CYAN}https://github.com/router-for-me/CLIProxyAPI${NC}"
-    fi
+    echo -e "${BLUE}3. Start the service:${NC}"
+    echo -e "   ${CYAN}./cli-proxy-api${NC}"
+    echo
+    echo -e "${BLUE}4. Or run as a systemd service:${NC}"
+    echo -e "   ${CYAN}systemctl --user enable cliproxyapi.service${NC}"
+    echo -e "   ${CYAN}systemctl --user start cliproxyapi.service${NC}"
+    echo -e "   ${CYAN}systemctl --user status cliproxyapi.service${NC}"
     echo
 }
 
 # Detect Linux architecture
 detect_linux_arch() {
-    # Detect architecture
     case "$(uname -m)" in
-        x86_64|amd64)
-            echo "linux_amd64"
-            ;;
-        arm64|aarch64)
-            echo "linux_arm64"
-            ;;
+        x86_64|amd64)  echo "linux_amd64" ;;
+        arm64|aarch64) echo "linux_arm64" ;;
         *)
-            log_error "Unsupported architecture: $(uname -m). Only x86_64 and arm64 are supported on Linux."
+            log_error "Unsupported architecture: $(uname -m). Only x86_64 and arm64 are supported."
             exit 1
             ;;
     esac
@@ -331,77 +156,48 @@ detect_linux_arch() {
 # Check if required tools are available
 check_dependencies() {
     local missing_tools=()
-
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        missing_tools+=("curl or wget")
-    fi
-
     if ! command -v tar >/dev/null 2>&1; then
         missing_tools+=("tar")
     fi
-
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         log_error "Missing required tools: ${missing_tools[*]}"
-        log_info "Please install the missing tools and try again"
-        log_info "On Ubuntu/Debian: sudo apt-get install curl wget tar"
-        log_info "On CentOS/RHEL: sudo yum install curl wget tar"
+        log_info "On Ubuntu/Debian: sudo apt-get install tar"
+        log_info "On CentOS/RHEL: sudo yum install tar"
         exit 1
     fi
 }
 
-# Fetch latest release info from GitHub API
-fetch_release_info() {
-    log_info "Fetching latest release information..."
-    
-    local release_info
-    if command -v curl >/dev/null 2>&1; then
-        release_info=$(curl -s "$API_URL")
-    else
-        release_info=$(wget -qO- "$API_URL")
+# Find the release package in PACKAGE_DIR
+find_package() {
+    local arch="$1"
+    # 优先匹配带架构后缀的包，再匹配任意 tar.gz
+    local pkg
+    pkg=$(find "$PACKAGE_DIR" -maxdepth 1 -name "*${arch}*.tar.gz" | sort | tail -1)
+    if [[ -z "$pkg" ]]; then
+        pkg=$(find "$PACKAGE_DIR" -maxdepth 1 -name "*.tar.gz" | sort | tail -1)
     fi
-    
-    if [[ -z "$release_info" ]]; then
-        log_error "Failed to fetch release information from GitHub API"
+    if [[ -z "$pkg" ]]; then
+        log_error "No .tar.gz package found in $PACKAGE_DIR"
+        log_info "Please place the release package in $PACKAGE_DIR before running this script."
         exit 1
     fi
-    
-    echo "$release_info"
+    echo "$pkg"
 }
 
-# Extract version and download URL from release info
-extract_release_info() {
-    local release_info="$1"
-    local os_arch="$2"
-    
+# Extract version from package filename or version.txt inside archive
+extract_version_from_package() {
+    local pkg="$1"
+    # Try to get version from filename (e.g. server_v1.2.3_linux_amd64.tar.gz)
     local version
-    version=$(echo "$release_info" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
-    
+    version=$(basename "$pkg" | grep -oE 'v[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
     if [[ -z "$version" ]]; then
-        log_error "Failed to extract version from release info"
-        exit 1
+        # Fallback: use date as version
+        version="$(date +%Y%m%d)"
     fi
-    
-    local expected_filename="CLIProxyAPI_${version}_${os_arch}"
-    local download_url=""
-    
-    # Handle different file extensions
-    if [[ "$os_arch" == windows_* ]]; then
-        expected_filename="${expected_filename}.zip"
-    else
-        expected_filename="${expected_filename}.tar.gz"
-    fi
-    
-    download_url=$(echo "$release_info" | grep -o "\"browser_download_url\": *\"[^\"]*${expected_filename}[^\"]*\"" | cut -d'"' -f4)
-    
-    if [[ -z "$download_url" ]]; then
-        log_error "Failed to find download URL for ${expected_filename}"
-        exit 1
-    fi
-    
-    echo "${version}|${download_url}"
+    echo "$version"
 }
 
-# Check if CLIProxyAPI is already installed
+# Check if proxy server is already installed
 is_installed() {
     [[ -f "${INSTALL_DIR}/version.txt" ]]
 }
@@ -415,29 +211,15 @@ get_current_version() {
     fi
 }
 
-# Get current version directory
-get_current_version_dir() {
-    local current_version
-    current_version=$(get_current_version)
-    if [[ "$current_version" != "none" ]]; then
-        echo "${INSTALL_DIR}/${current_version}"
-    else
-        echo ""
-    fi
-}
-
 # Backup existing configuration
 backup_config() {
     local config="${INSTALL_DIR}/config.yaml"
-    
     if [[ -f "$config" ]]; then
         local backup_dir="${INSTALL_DIR}/config_backup"
         mkdir -p "$backup_dir"
-        
         local timestamp
         timestamp=$(date +"%Y%m%d_%H%M%S")
         local backup_file="${backup_dir}/config_${timestamp}.yaml"
-        
         cp "$config" "$backup_file"
         log_info "Configuration backed up to: $backup_file"
         echo "$backup_file"
@@ -446,100 +228,71 @@ backup_config() {
     fi
 }
 
-# Restore configuration to new version
-restore_config() {
-    local new_version_dir="$1"
-    local backup_file="$2"
-    
-    if [[ -n "$backup_file" && -f "$backup_file" ]]; then
-        cp "$backup_file" "${new_version_dir}/config.yaml"
-        log_success "Configuration restored from backup"
-    fi
-}
-
 # Check if systemd service is running
 is_service_running() {
     systemctl --user is-active --quiet cliproxyapi.service 2>/dev/null
 }
 
-# Check if any CLIProxyAPI processes are running
-is_cliproxyapi_running() {
+# Check if any proxy processes are running
+is_proxy_running() {
     pgrep -f "cli-proxy-api" >/dev/null 2>&1
 }
 
-# Stop any running CLIProxyAPI processes
-stop_cliproxyapi_processes() {
+# Stop any running proxy processes
+stop_proxy_processes() {
     local pids
     pids=$(pgrep -f "cli-proxy-api" 2>/dev/null || true)
-    
     if [[ -n "$pids" ]]; then
-        log_info "Stopping running CLIProxyAPI processes..."
+        log_info "Stopping running proxy processes..."
         echo "$pids" | while read -r pid; do
-            if [[ -n "$pid" ]]; then
-                kill "$pid" 2>/dev/null || true
-                log_info "Sent TERM signal to process $pid"
-            fi
+            [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
         done
-        
-        # Wait a moment for graceful shutdown
         sleep 2
-        
-        # Check if any processes are still running and force kill if needed
-        local remaining_pids
-        remaining_pids=$(pgrep -f "cli-proxy-api" 2>/dev/null || true)
-        if [[ -n "$remaining_pids" ]]; then
-            log_warning "Some processes didn't stop gracefully, force killing..."
-            echo "$remaining_pids" | while read -r pid; do
-                if [[ -n "$pid" ]]; then
-                    kill -9 "$pid" 2>/dev/null || true
-                    log_info "Force killed process $pid"
-                fi
+        local remaining
+        remaining=$(pgrep -f "cli-proxy-api" 2>/dev/null || true)
+        if [[ -n "$remaining" ]]; then
+            log_warning "Force killing remaining processes..."
+            echo "$remaining" | while read -r pid; do
+                [[ -n "$pid" ]] && kill -9 "$pid" 2>/dev/null || true
             done
             sleep 1
         fi
-        
-        log_success "All CLIProxyAPI processes stopped"
+        log_success "All proxy processes stopped"
     else
-        log_info "No CLIProxyAPI processes are running"
+        log_info "No proxy processes are running"
     fi
 }
 
-# Stop systemd service if running
+# Stop systemd service
 stop_service() {
     if is_service_running; then
-        log_info "Stopping CLIProxyAPI service..."
+        log_info "Stopping proxy service..."
         systemctl --user stop cliproxyapi.service
         log_success "Service stopped"
-    else
-        log_info "Service is not running"
     fi
 }
 
 # Start systemd service
 start_service() {
-    log_info "Starting CLIProxyAPI service..."
+    log_info "Starting proxy service..."
     systemctl --user start cliproxyapi.service
-    
-    # Wait a moment and check if it started successfully
     sleep 2
     if is_service_running; then
         log_success "Service started successfully"
     else
-        log_warning "Service may not have started properly. Check with: systemctl --user status cliproxyapi.service"
+        log_warning "Service may not have started. Check: systemctl --user status cliproxyapi.service"
     fi
 }
 
 # Restart systemd service
 restart_service() {
-    log_info "Restarting CLIProxyAPI service..."
+    log_info "Restarting proxy service..."
     systemctl --user restart cliproxyapi.service
-    
-    # Wait a moment and check if it started successfully
     sleep 2
     if is_service_running; then
         log_success "Service restarted successfully"
     else
-        log_warning "Service may not have started properly. Check with: systemctl --user status cliproxyapi.service"
+        log_warning "Service may not have started. Check: systemctl --user status cliproxyapi.service"
     fi
 }
 
@@ -549,16 +302,13 @@ create_systemd_service() {
     local service_file="${install_dir}/cliproxyapi.service"
     local systemd_dir="$HOME/.config/systemd/user"
     local systemd_service_file="${systemd_dir}/cliproxyapi.service"
-    
+
     log_info "Creating systemd service file..."
-    
-    # Create systemd user directory
     mkdir -p "$systemd_dir"
-    
-    # Create service file content with basic working configuration
+
     cat > "$service_file" << EOF
 [Unit]
-Description=CLIProxyAPI Service
+Description=Proxy API Service
 After=network.target
 
 [Service]
@@ -573,113 +323,65 @@ Environment=HOME=$HOME
 WantedBy=default.target
 EOF
 
-    # Copy to systemd user directory
     cp "$service_file" "$systemd_service_file"
-    
-    # Reload systemd daemon
-    systemctl --user daemon-reload || log_warning "Could not reload systemd daemon (this is normal on first run)"
+    systemctl --user daemon-reload || log_warning "Could not reload systemd daemon"
 
-    log_success "Systemd service file created: $service_file"
-    log_success "Systemd service installed: $systemd_service_file"
-    log_info "To enable and start the service:"
-    log_info "  systemctl --user enable cliproxyapi.service"
-    log_info "  systemctl --user start cliproxyapi.service"
-    log_info "  systemctl --user status cliproxyapi.service"
+    log_success "Systemd service file created: $systemd_service_file"
 }
 
-# Copy example config if no existing config and setup main directory structure
+# Setup configuration
 setup_config() {
     local version_dir="$1"
     local backup_file="$2"
-    
+
     log_info "Setting up configuration..."
-    
+
     local config="${INSTALL_DIR}/config.yaml"
     local example_config="${version_dir}/config.example.yaml"
     local executable="${version_dir}/cli-proxy-api"
-    
+
     # Copy executable to main directory
     if [[ -f "$executable" ]]; then
         cp "$executable" "${INSTALL_DIR}/cli-proxy-api"
+        chmod +x "${INSTALL_DIR}/cli-proxy-api"
         log_success "Copied executable to ${INSTALL_DIR}/cli-proxy-api"
     fi
-    
-    # PRIORITY 1: If we have a backup from this upgrade, restore it
+
+    # Restore backup if upgrading
     if [[ -n "$backup_file" && -f "$backup_file" ]]; then
         cp "$backup_file" "$config"
         log_success "Restored configuration from backup"
         return
     fi
-    
-    # PRIORITY 2: Check for existing config in main directory (NEVER overwrite)
+
+    # Preserve existing config
     if [[ -f "$config" ]]; then
-        log_success "Preserved existing user configuration (config.yaml)"
-        log_info "User modifications are protected during upgrades"
+        log_success "Preserved existing configuration (config.yaml)"
         return
     fi
-    
-    # PRIORITY 3: Check for existing config in previous version directory
-    local current_version_dir
-    current_version_dir=$(get_current_version_dir)
-    if [[ -n "$current_version_dir" && -f "${current_version_dir}/config.yaml" ]]; then
-        cp "${current_version_dir}/config.yaml" "$config"
-        log_success "Preserved existing configuration from previous version"
-        return
-    fi
-    
-    # PRIORITY 4: Only create from example if NO existing config found
+
+    # Create from example
     if [[ -f "$example_config" ]]; then
         cp "$example_config" "$config"
-
-        # Generate and replace API key
-        local generated_key1
-        local generated_key2
-        generated_key1=$(generate_api_key)
-        generated_key2=$(generate_api_key)
-
-        # Replace placeholder API keys with generated keys
-        sed -i "s/\"your-api-key-1\"/\"$generated_key1\"/g" "$config"
-        sed -i "s/\"your-api-key-2\"/\"$generated_key2\"/g" "$config"
-
+        local key1 key2
+        key1=$(generate_api_key)
+        key2=$(generate_api_key)
+        sed -i "s/\"your-api-key-1\"/\"$key1\"/g" "$config"
+        sed -i "s/\"your-api-key-2\"/\"$key2\"/g" "$config"
         log_success "Created config.yaml from example with generated API keys"
-        log_info "Generated API keys: $generated_key1, $generated_key2"
-        log_info "You can find your API keys in: $config"
+        log_info "API keys: $key1, $key2"
     else
-        log_warning "config.example.yaml not found, you may need to create config.yaml manually"
+        log_warning "config.example.yaml not found, please create config.yaml manually"
     fi
-}
-
-# Download file
-download_file() {
-    local url="$1"
-    local output="$2"
-    
-    log_info "Downloading $(basename "$url")..."
-    
-    if command -v curl >/dev/null 2>&1; then
-        curl -L -o "$output" "$url"
-    else
-        wget -O "$output" "$url"
-    fi
-    
-    if [[ ! -f "$output" ]]; then
-        log_error "Failed to download file"
-        exit 1
-    fi
-    
-    log_success "Download completed"
 }
 
 # Extract tar.gz archive
 extract_archive() {
     local archive="$1"
     local dest_dir="$2"
-
     log_info "Extracting archive to $dest_dir..."
-
     mkdir -p "$dest_dir"
     tar -xzf "$archive" -C "$dest_dir"
-
     log_success "Extraction completed"
 }
 
@@ -687,25 +389,17 @@ extract_archive() {
 write_version_file() {
     local install_dir="$1"
     local version="$2"
-    
     echo "$version" > "${install_dir}/version.txt"
     log_success "Version $version written to version.txt"
 }
 
-# Clean up old versions (keep last 2 versions)
+# Clean up old versions (keep last 2)
 cleanup_old_versions() {
     local current_version="$1"
-    
-    if [[ ! -d "$INSTALL_DIR" ]]; then
-        return
-    fi
-    
+    if [[ ! -d "$INSTALL_DIR" ]]; then return; fi
     log_info "Cleaning up old versions..."
-    
-    # Get all version directories, sort them, and remove all but the latest 2
     local old_versions
-    old_versions=$(find "$INSTALL_DIR" -maxdepth 1 -type d -name "*.*.*" -printf "%f\n" | sort -V | head -n -2)
-    
+    old_versions=$(find "$INSTALL_DIR" -maxdepth 1 -type d -name "*.*" -printf "%f\n" 2>/dev/null | sort -V | head -n -2 || true)
     if [[ -n "$old_versions" ]]; then
         echo "$old_versions" | while read -r version; do
             if [[ "$version" != "$current_version" && -n "$version" ]]; then
@@ -716,355 +410,220 @@ cleanup_old_versions() {
     fi
 }
 
-# Make binary executable
-make_executable() {
-    local version_dir="$1"
-
-    local binary
-    binary=$(find "$version_dir" -name "CLIProxyAPI" -o -name "cli-proxy-api" -type f | head -1)
-    if [[ -n "$binary" ]]; then
-        chmod +x "$binary"
-        log_success "Made CLIProxyAPI binary executable"
-    fi
-}
-
 # Main installation function
-install_cliproxyapi() {
+install_proxy() {
     local current_version
     current_version=$(get_current_version)
     local is_upgrade=false
     local service_was_running=false
-    
+
     if [[ "$current_version" != "none" ]]; then
-        log_info "Current CLIProxyAPI version: $current_version"
+        log_info "Current installed version: $current_version"
         is_upgrade=true
-        
-        # Check if service is running before upgrade
         if is_service_running; then
             service_was_running=true
-            log_info "Service is currently running and will be restarted after upgrade"
         fi
     else
-        log_info "CLIProxyAPI not installed, performing fresh installation"
+        log_info "No existing installation found, performing fresh install"
     fi
-    
-    # Check dependencies
+
     check_dependencies
-    
-    # Detect Linux architecture
+
     local os_arch
     os_arch=$(detect_linux_arch)
     log_step "Detected platform: $os_arch"
-    
-    # Fetch release info
-    local release_info
-    release_info=$(fetch_release_info)
-    
-    # Extract version and download URL
-    local release_data
-    release_data=$(extract_release_info "$release_info" "$os_arch")
-    local version=$(echo "$release_data" | cut -d'|' -f1)
-    local download_url=$(echo "$release_data" | cut -d'|' -f2)
-    
-    log_step "Latest version: $version"
-    
+
+    # Find package in PACKAGE_DIR
+    local pkg
+    pkg=$(find_package "$os_arch")
+    log_step "Using package: $pkg"
+
+    # Extract version
+    local version
+    version=$(extract_version_from_package "$pkg")
+    log_step "Package version: $version"
+
     # Check if already up to date
     if [[ "$is_upgrade" == true && "$current_version" == "$version" ]]; then
-        log_success "CLIProxyAPI is already up to date (version $version)"
+        log_success "Already up to date (version $version)"
         return
     fi
-    
-    # Stop service and processes if running (for upgrades)
+
+    # Stop service/processes if upgrading
     if [[ "$is_upgrade" == true ]]; then
-        if is_service_running; then
-            stop_service
-        fi
-        if is_cliproxyapi_running; then
-            stop_cliproxyapi_processes
-        fi
+        is_service_running && stop_service
+        is_proxy_running && stop_proxy_processes
     fi
-    
-    # Backup existing configuration if upgrading
+
+    # Backup config if upgrading
     local backup_file=""
     if [[ "$is_upgrade" == true ]]; then
         backup_file=$(backup_config)
     fi
-    
-    # Create installation directory
+
+    # Create version directory and extract
     local version_dir="${INSTALL_DIR}/${version}"
     mkdir -p "$INSTALL_DIR"
-    
-    # Download and extract
-    local temp_file
-    temp_file=$(mktemp)
-    
-    download_file "$download_url" "$temp_file"
-    extract_archive "$temp_file" "$version_dir"
-    
-    # Cleanup temp file
-    rm -f "$temp_file"
-    
-    # Make binary executable
-    make_executable "$version_dir"
-    
-    # Setup configuration and copy executable to main directory
+    extract_archive "$pkg" "$version_dir"
+
+    # Setup config and copy executable
     setup_config "$version_dir" "$backup_file"
-    
-    # Make main executable executable
-    chmod +x "${INSTALL_DIR}/cli-proxy-api"
-    
-    # Create/update systemd service file
+
+    # Create/update systemd service
     create_systemd_service "$INSTALL_DIR"
-    
+
     # Write version file
     write_version_file "$INSTALL_DIR" "$version"
-    
-    # Clean up old versions
+
+    # Cleanup old versions
     cleanup_old_versions "$version"
-    
-    # Restart service if it was running before upgrade
+
+    # Restart service if it was running
     if [[ "$is_upgrade" == true && "$service_was_running" == true ]]; then
         restart_service
     fi
-    
+
     # Success message
     if [[ "$is_upgrade" == true ]]; then
-        log_success "CLIProxyAPI upgraded from $current_version to $version!"
+        log_success "Upgraded from $current_version to $version!"
         log_info "Installation directory: $INSTALL_DIR"
-        
         if [[ "$service_was_running" == true ]]; then
             log_info "Service has been restarted automatically"
-        elif is_service_running; then
-            log_info "Service is running"
         else
             log_info "To start the service: systemctl --user start cliproxyapi.service"
         fi
-        
-        # Check if this is the first time setup (no existing config)
-        if [[ ! -f "${INSTALL_DIR}/config.yaml" ]]; then
-            show_authentication_info
-            show_quick_start "$INSTALL_DIR"
-        else
-            log_info "Your existing configuration has been preserved"
-            log_info "To use CLIProxyAPI: cd $INSTALL_DIR && ./cli-proxy-api --help"
-        fi
     else
-        log_success "CLIProxyAPI $version installed successfully!"
+        log_success "Installed successfully! (version $version)"
         log_info "Installation directory: $INSTALL_DIR"
-        
-        # Show authentication information for first-time setup
         show_authentication_info
         show_quick_start "$INSTALL_DIR"
     fi
 }
 
-# Show current installation status
+# Show current status
 show_status() {
     local current_version
     current_version=$(get_current_version)
-    
-    echo "CLIProxyAPI Installation Status"
-    echo "=============================="
+
+    echo "Proxy Server Installation Status"
+    echo "================================="
     echo "Install Directory: $INSTALL_DIR"
-    echo "Current Version: $current_version"
-    
+    echo "Package Directory: $PACKAGE_DIR"
+    echo "Current Version:   $current_version"
+
     if [[ "$current_version" != "none" ]]; then
-        local current_version_dir
-        current_version_dir=$(get_current_version_dir)
-        echo "Version Directory: $current_version_dir"
-        
         if [[ -f "${INSTALL_DIR}/config.yaml" ]]; then
-            echo "Configuration: Present (at ${INSTALL_DIR}/config.yaml)"
+            echo "Configuration: Present"
         else
             echo "Configuration: Missing"
         fi
-        
         if [[ -f "${INSTALL_DIR}/cli-proxy-api" ]]; then
-            echo "Executable: Present (at ${INSTALL_DIR}/cli-proxy-api)"
+            echo "Executable: Present"
         else
             echo "Executable: Missing"
         fi
-        
-        if [[ -f "${INSTALL_DIR}/cliproxyapi.service" ]]; then
-            echo "Systemd Service: Available"
-            echo "  To enable: systemctl --user enable cliproxyapi.service"
-            echo "  To start:  systemctl --user start cliproxyapi.service"
+        if is_service_running; then
+            echo -e "Service: ${GREEN}Running${NC}"
         else
-            echo "Systemd Service: Missing"
+            echo -e "Service: ${YELLOW}Stopped${NC}"
         fi
-        
-        # Check API keys status
         if check_api_keys; then
-            echo "API Keys: Configured"
+            echo -e "API Keys: ${GREEN}Configured${NC}"
         else
-            echo -e "API Keys: ${YELLOW}NOT CONFIGURED${NC} - Edit config.yaml to add API keys"
-        fi
-        
-        # Show available versions
-        if [[ -d "$INSTALL_DIR" ]]; then
-            echo "Installed Versions:"
-            find "$INSTALL_DIR" -maxdepth 1 -type d -name "*.*.*" -printf "  %f\n" | sort -V
+            echo -e "API Keys: ${YELLOW}NOT CONFIGURED${NC} - Edit config.yaml"
         fi
     else
         echo "Status: Not installed"
     fi
 }
 
-# Uninstall function
-uninstall_cliproxyapi() {
+# Uninstall
+uninstall_proxy() {
     if [[ ! -d "$INSTALL_DIR" ]]; then
-        log_warning "CLIProxyAPI installation directory not found: $INSTALL_DIR"
+        log_warning "Installation directory not found: $INSTALL_DIR"
         exit 0
     fi
-    
-    log_info "CLIProxyAPI installation found at: $INSTALL_DIR"
-    
-    # Show what will be removed
+
+    log_info "Installation found at: $INSTALL_DIR"
+    read -p "Are you sure you want to remove the proxy server? (y/N): " -n 1 -r
     echo
-    log_info "The following will be removed:"
-    find "$INSTALL_DIR" -type f -exec echo "  {}" \;
-    echo
-    
-    # Ask for confirmation
-    read -p "Are you sure you want to remove CLIProxyAPI? (y/N): " -n 1 -r
-    echo
-    
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         log_info "Uninstallation cancelled"
         exit 0
     fi
-    
-    # Remove installation directory
-    log_info "Removing CLIProxyAPI installation..."
+
+    is_service_running && stop_service
+    is_proxy_running && stop_proxy_processes
+
     rm -rf "$INSTALL_DIR"
-    
-    log_success "CLIProxyAPI has been uninstalled successfully"
+    log_success "Proxy server has been uninstalled"
 }
 
-# Cleanup function on exit
+# Cleanup on exit
 cleanup() {
-    local temp_files
-    temp_files=$(find /tmp -name "tmp.*" -user "$(whoami)" 2>/dev/null || true)
-    if [[ -n "$temp_files" ]]; then
-        echo "$temp_files" | xargs rm -f 2>/dev/null || true
-    fi
+    find /tmp -name "tmp.*" -user "$(whoami)" -delete 2>/dev/null || true
 }
-
-# Set up cleanup trap
 trap cleanup EXIT
 
-# Main script logic
+# Main
 main() {
     case "${1:-install}" in
         "install"|"upgrade")
-            install_cliproxyapi
+            install_proxy
             ;;
         "status")
             show_status
             ;;
         "auth")
             show_authentication_info
-            if is_installed; then
-                local current_version_dir
-                current_version_dir=$(get_current_version_dir)
-                if [[ -n "$current_version_dir" ]]; then
-                    show_quick_start "$current_version_dir"
-                fi
-            fi
+            is_installed && show_quick_start "$INSTALL_DIR"
             ;;
         "check-config")
             if is_installed; then
                 echo "Configuration Check"
-                echo "=================="
-                echo "Config file: ${INSTALL_DIR}/config.yaml"
-
+                echo "==================="
                 if check_api_keys; then
                     echo -e "✅ API Keys: ${GREEN}Configured${NC}"
-                    echo -e "✅ Status: ${GREEN}Ready to run${NC}"
-                    echo
-                    echo -e "${BLUE}Current API keys in config.yaml:${NC}"
-                    grep -A 10 "^api-keys:" "${INSTALL_DIR}/config.yaml" | grep -v "^#" | head -10
-                    echo
-                    echo -e "${BLUE}You can now start CLIProxyAPI:${NC}"
-                    echo -e "  ${CYAN}cd ${INSTALL_DIR}${NC}"
-                    echo -e "  ${CYAN}./cli-proxy-api${NC}"
-                    echo
-                    echo -e "${BLUE}Or run as a service:${NC}"
-                    echo -e "  ${CYAN}systemctl --user start cliproxyapi.service${NC}"
+                    echo -e "✅ Status:   ${GREEN}Ready to run${NC}"
                 else
                     echo -e "❌ API Keys: ${RED}NOT CONFIGURED${NC}"
-                    echo -e "❌ Status: ${RED}Not ready to run${NC}"
-                    echo
                     show_api_key_setup
                 fi
             else
-                log_error "CLIProxyAPI is not installed"
-                echo "Install it first with: $SCRIPT_NAME install"
+                log_error "Not installed. Run: $SCRIPT_NAME install"
             fi
             ;;
         "generate-key")
             local new_key
             new_key=$(generate_api_key)
-            echo "Generated OpenAI-format API Key:"
-            echo "================================"
+            echo "Generated API Key:"
+            echo "=================="
             echo -e "${GREEN}$new_key${NC}"
             echo
-            echo -e "${BLUE}To use this key, add it to your config.yaml:${NC}"
-            echo -e "${CYAN}api-keys:${NC}"
-            echo -e "${CYAN}  - \"$new_key\"${NC}"
-            echo
-            echo -e "${YELLOW}Note: This generates a new key but doesn't modify your config file.${NC}"
-            echo -e "${YELLOW}Edit ${INSTALL_DIR}/config.yaml manually to add this key.${NC}"
-            ;;
-        "manage-docs")
-            manage_documentation
+            echo -e "${YELLOW}Add it to ${INSTALL_DIR}/config.yaml under api-keys.${NC}"
             ;;
         "uninstall")
-            uninstall_cliproxyapi
+            uninstall_proxy
             ;;
         "-h"|"--help")
             cat << EOF
- CLIProxyAPI Linux Installer
+Proxy Server Linux Installer
 
-Usage: $SCRIPT_NAME [COMMAND] [OPTIONS]
+Usage: $SCRIPT_NAME [COMMAND]
 
 Commands:
-  install, upgrade    Install or upgrade CLIProxyAPI (default)
-  status             Show current installation status
-  auth               Show authentication setup information
-  check-config       Check configuration and API keys
-  generate-key       Generate new API key and show it
-  manage-docs        Manage documentation (update, organize, check consistency)
-  uninstall          Remove CLIProxyAPI completely
-  -h, --help         Show this help message
+  install, upgrade    Install or upgrade (reads package from $PACKAGE_DIR)
+  status              Show current installation status
+  auth                Show authentication setup information
+  check-config        Check configuration and API keys
+  generate-key        Generate a new API key
+  uninstall           Remove the proxy server completely
+  -h, --help          Show this help message
 
-Description:
-  This Linux-specific script installs, upgrades, or removes CLIProxyAPI.
-  It can be run from anywhere and automatically detects your Linux architecture.
+Package directory: $PACKAGE_DIR
+Install directory: $INSTALL_DIR
 
-  During upgrades, your config.yaml file is preserved automatically.
-
-Features:
-  - Automatic Linux architecture detection (amd64/arm64)
-  - Downloads latest version from GitHub releases
-  - Preserves configuration during upgrades
-  - Automatic API key generation
-  - Systemd service file creation
-  - Cleans up old versions (keeps latest 2)
-
-Installation Directory: ~/cliproxyapi/
-
-Supported Platforms:
-  - Linux: amd64, arm64
-
-Examples:
-  $SCRIPT_NAME              # Install or upgrade
-  $SCRIPT_NAME status       # Show current status
-  $SCRIPT_NAME auth         # Show authentication info
-  $SCRIPT_NAME check-config # Check configuration
-  $SCRIPT_NAME generate-key # Generate new API key
-  $SCRIPT_NAME uninstall    # Remove completely
-
+Place a .tar.gz release package in $PACKAGE_DIR before running install.
 EOF
             ;;
         *)
@@ -1075,5 +634,4 @@ EOF
     esac
 }
 
-# Run main function with all arguments
 main "$@"

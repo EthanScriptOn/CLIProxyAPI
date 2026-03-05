@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	internalapi "github.com/router-for-me/CLIProxyAPI/v6/internal/api"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/logging"
+	internalapi "proxycore/api/v6/internal/api"
+	"proxycore/api/v6/sdk/api/handlers"
+	"proxycore/api/v6/sdk/config"
+	"proxycore/api/v6/sdk/logging"
 )
 
 // ServerOption customises HTTP server construction.

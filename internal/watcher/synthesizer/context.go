@@ -3,7 +3,7 @@ package synthesizer
 import (
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"proxycore/api/v6/internal/config"
 )
 
 // SynthesisContext provides the context needed for auth synthesis.

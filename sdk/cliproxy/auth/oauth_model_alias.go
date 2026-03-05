@@ -3,8 +3,8 @@ package auth
 import (
 	"strings"
 
-	internalconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
+	internalconfig "proxycore/api/v6/internal/config"
+	"proxycore/api/v6/internal/thinking"
 )
 
 type modelAliasEntry interface {

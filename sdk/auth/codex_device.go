@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/browser"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"proxycore/api/v6/internal/auth/codex"
+	"proxycore/api/v6/internal/browser"
+	"proxycore/api/v6/internal/config"
+	"proxycore/api/v6/internal/util"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 

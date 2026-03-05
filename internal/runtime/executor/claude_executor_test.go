@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
-	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
+	"proxycore/api/v6/internal/config"
+	cliproxyauth "proxycore/api/v6/sdk/cliproxy/auth"
+	cliproxyexecutor "proxycore/api/v6/sdk/cliproxy/executor"
+	sdktranslator "proxycore/api/v6/sdk/translator"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

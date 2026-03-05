@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	coreexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	"proxycore/api/v6/internal/registry"
+	"proxycore/api/v6/sdk/api/handlers"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
+	coreexecutor "proxycore/api/v6/sdk/cliproxy/executor"
+	sdkconfig "proxycore/api/v6/sdk/config"
 )
 
 type compactCaptureExecutor struct {

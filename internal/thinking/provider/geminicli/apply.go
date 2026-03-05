@@ -5,8 +5,8 @@
 package geminicli
 
 import (
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
+	"proxycore/api/v6/internal/registry"
+	"proxycore/api/v6/internal/thinking"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

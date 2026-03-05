@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/buildinfo"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"proxycore/api/v6/internal/buildinfo"
+	"proxycore/api/v6/internal/config"
+	"proxycore/api/v6/internal/usage"
+	sdkAuth "proxycore/api/v6/sdk/auth"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 

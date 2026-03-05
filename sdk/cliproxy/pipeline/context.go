@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/http"
 
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
-	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
+	cliproxyauth "proxycore/api/v6/sdk/cliproxy/auth"
+	cliproxyexecutor "proxycore/api/v6/sdk/cliproxy/executor"
+	sdktranslator "proxycore/api/v6/sdk/translator"
 )
 
 // Context encapsulates execution state shared across middleware, translators, and executors.

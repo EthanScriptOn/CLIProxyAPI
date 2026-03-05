@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/handlers/management"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"proxycore/api/v6/internal/api/handlers/management"
+	"proxycore/api/v6/internal/config"
 )
 
 func init() {

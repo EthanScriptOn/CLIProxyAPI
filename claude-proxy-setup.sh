@@ -1,12 +1,21 @@
 #!/bin/bash
 
 # Claude API 反向代理一键部署脚本
-# 域名: claudeproxy.duckdns.org
 # 服务: Caddy + CLIProxyAPI
 
 PROXY_API_KEY="sk-proxy-eoEgBNSGZ6eWYkYGSJlUaOFk9ZmTRTTQnfZyoTxGQ"
-DOMAIN="claudeproxy.duckdns.org"
 CLI_PROXY_DIR="/root/cliproxyapi"
+
+# 动态读取域名
+while true; do
+    read -rp "请输入你的域名（例如 example.com）: " DOMAIN
+    DOMAIN="${DOMAIN// /}"   # 去除空格
+    if [[ -n "$DOMAIN" ]]; then
+        break
+    fi
+    echo "域名不能为空，请重新输入。"
+done
+echo "使用域名: $DOMAIN"
 
 # ==============================
 # 工具函数
@@ -53,7 +62,7 @@ fi
 
 if [ ! -f "$CLI_PROXY_DIR/cli-proxy-api" ]; then
     echo "安装 CLIProxyAPI..."
-    bash "$(dirname "$0")/cliproxyapi-installer.sh"
+    CLI_PROXY_DIR="$CLI_PROXY_DIR" bash "$(dirname "$0")/cliproxyapi-installer.sh"
     echo "CLIProxyAPI 安装完成"
 fi
 
@@ -85,7 +94,7 @@ echo "=== 4. 配置 Caddyfile ==="
 cat > /etc/caddy/Caddyfile <<EOF
 $DOMAIN {
     handle {
-        reverse_proxy localhost:8080
+        reverse_proxy 127.0.0.1:8080
     }
 }
 EOF
