@@ -30,8 +30,23 @@ if ! command -v go >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v npm >/dev/null 2>&1; then
+    log_error "未找到 npm，请先安装 Node.js"
+    exit 1
+fi
+
 # ==============================
-# 2. 交叉编译 linux/amd64
+# 2. 构建前端
+# ==============================
+log_step "构建前端..."
+cd "${PROJECT_DIR}/frontend"
+npm install --silent
+npm run build --silent
+cp "${PROJECT_DIR}/frontend/dist/"*.html "${PROJECT_DIR}/static/"
+log_success "前端构建完成，已同步到 static/"
+
+# ==============================
+# 3. 交叉编译 linux/amd64
 # ==============================
 log_step "交叉编译 linux/amd64 二进制..."
 
@@ -64,6 +79,9 @@ log_step "打包 → ${PACKAGE_NAME}"
 tar_args=(-czf "$PACKAGE_PATH" -C "$BUILD_DIR" "${BINARY_NAME}")
 if [[ -f "${PROJECT_DIR}/config.example.yaml" ]]; then
     tar_args+=(-C "${PROJECT_DIR}" config.example.yaml)
+fi
+if [[ -d "${PROJECT_DIR}/static" ]]; then
+    tar_args+=(-C "${PROJECT_DIR}" static)
 fi
 tar "${tar_args[@]}"
 
