@@ -347,6 +347,12 @@ setup_config() {
         log_success "Copied executable to ${INSTALL_DIR}/cli-proxy-api"
     fi
 
+    # Copy static files
+    if [[ -d "${version_dir}/static" ]]; then
+        cp -r "${version_dir}/static" "${INSTALL_DIR}/"
+        log_success "Copied static files to ${INSTALL_DIR}/static"
+    fi
+
     # Restore backup if upgrading
     if [[ -n "$backup_file" && -f "$backup_file" ]]; then
         cp "$backup_file" "$config"
