@@ -71,6 +71,61 @@ bash /root/cliproxyapi/claude-proxy-setup.sh
 
 ---
 
+## 域名被 GFW 封锁后的更换流程
+
+当域名遭到 GFW SNI 拦截时，按以下步骤重新申请域名并接入 Cloudflare：
+
+### 1. 申请新域名
+- 去西部数码（或其他注册商）购买一个新域名
+
+### 2. 接入 Cloudflare
+1. 登录 [cloudflare.com](https://cloudflare.com) → Add a Site → 输入新域名
+2. 选 Free 计划
+3. Cloudflare 会给你两个 NS 地址（如 `anahi.ns.cloudflare.com`）
+4. 去西部数码后台，把该域名的 **DNS 服务器** 改成 Cloudflare 给的那两个
+5. 等待生效（通常几分钟到几小时），Cloudflare 显示 Active 即可
+
+### 3. 配置 DNS 记录
+在 Cloudflare → DNS → Records → Add record：
+- Type: `A`
+- Name: `@`
+- IPv4: 服务器 IP（如 `144.202.99.107`）
+- Proxy status: **Proxied（橙色云朵）** ← 关键，隐藏真实 IP
+
+### 4. 更新服务器 Caddy 配置
+
+```bash
+sudo nano /etc/caddy/Caddyfile
+```
+
+将域名改为新域名：
+
+```
+新域名.xyz {
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
+}
+```
+
+重启 Caddy：
+
+```bash
+sudo systemctl reload caddy
+```
+
+### 5. 验证
+
+```bash
+curl https://新域名
+```
+
+返回如下内容即成功：
+
+```json
+{"endpoints":["POST /v1/chat/completions","POST /v1/completions","GET /v1/models"],"message":"CLI Proxy API Server"}
+```
+
 ## 常用运维命令
 
 ```bash
