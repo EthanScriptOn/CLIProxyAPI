@@ -28,11 +28,11 @@ dist/CLIProxyAPI_20260306_linux_amd64.tar.gz
 将构建产物和部署脚本上传到服务器：
 
 ```bash
-scp dist/CLIProxyAPI_*_linux_amd64.tar.gz root@<服务器IP>:/root/cliproxyapi/
-scp cliproxyapi-installer.sh root@<服务器IP>:/root/cliproxyapi/
-scp claude-proxy-setup.sh root@<服务器IP>:/root/cliproxyapi/
-scp claude-auth.sh root@<服务器IP>:/root/cliproxyapi/
-scp claude-verify.sh root@<服务器IP>:/root/cliproxyapi/
+scp dist/CLIProxyAPI_*_linux_amd64.tar.gz root@<服务器IP>:/root/proxycore/
+scp proxycore-installer.sh root@<服务器IP>:/root/proxycore/
+scp claude-proxy-setup.sh root@<服务器IP>:/root/proxycore/
+scp claude-auth.sh root@<服务器IP>:/root/proxycore/
+scp claude-verify.sh root@<服务器IP>:/root/proxycore/
 ```
 
 > 也可以用 `server-fetch.sh` 让服务器直接从 GitHub 拉取（需要服务器能访问 GitHub）：
@@ -49,16 +49,16 @@ SSH 登录服务器，执行一键部署脚本：
 
 ```bash
 ssh root@<服务器IP>
-bash /root/cliproxyapi/claude-proxy-setup.sh
+bash /root/proxycore/claude-proxy-setup.sh
 ```
 
 脚本会：
 1. 安装 Caddy
-2. 安装 CLIProxyAPI
+2. 安装 ProxyCore
 3. 写入配置文件（输入你的域名）
 4. 配置 Caddyfile 反向代理
 5. 开放防火墙 22/80/443 端口
-6. 启动 Caddy 和 CLIProxyAPI 服务
+6. 启动 Caddy 和 ProxyCore 服务
 
 ---
 
@@ -130,16 +130,16 @@ curl https://新域名
 
 ```bash
 # 停止服务
-systemctl --user stop cliproxyapi.service && sudo systemctl stop caddy
+systemctl --user stop proxycore.service && sudo systemctl stop caddy
 
 # 启动服务
-sudo systemctl start caddy && systemctl --user start cliproxyapi.service
+sudo systemctl start caddy && systemctl --user start proxycore.service
 
 # 查看服务状态
-systemctl --user status cliproxyapi.service
+systemctl --user status proxycore.service
 sudo systemctl status caddy
 
 # 查看日志
-journalctl --user -u cliproxyapi.service -f
+journalctl --user -u proxycore.service -f
 sudo journalctl -u caddy -f
 ```
