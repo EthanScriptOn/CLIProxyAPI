@@ -6,7 +6,8 @@
 set -euo pipefail
 
 REPO="EthanScriptOn/CLIProxyAPI"
-RAW_BASE="https://github.com/${REPO}/raw/main"
+# 修复：去掉空格，使用正确的 raw 域名
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 INSTALL_DIR="/root/proxycore"
 
 RED='\033[0;31m'
@@ -26,22 +27,34 @@ mkdir -p "$INSTALL_DIR"
 log_step "拉取部署脚本..."
 
 wget -q --show-progress -O "${INSTALL_DIR}/proxycore-installer.sh" \
-    "${RAW_BASE}/proxycore-installer.sh"
+    "${RAW_BASE}/proxycore-installer.sh" || {
+    log_error "下载 proxycore-installer.sh 失败"
+    exit 1
+}
 chmod +x "${INSTALL_DIR}/proxycore-installer.sh"
 log_success "proxycore-installer.sh"
 
 wget -q --show-progress -O "${INSTALL_DIR}/claude-proxy-setup.sh" \
-    "${RAW_BASE}/claude-proxy-setup.sh"
+    "${RAW_BASE}/claude-proxy-setup.sh" || {
+    log_error "下载 claude-proxy-setup.sh 失败"
+    exit 1
+}
 chmod +x "${INSTALL_DIR}/claude-proxy-setup.sh"
 log_success "claude-proxy-setup.sh"
 
 wget -q --show-progress -O "${INSTALL_DIR}/claude-auth.sh" \
-    "${RAW_BASE}/claude-auth.sh"
+    "${RAW_BASE}/claude-auth.sh" || {
+    log_error "下载 claude-auth.sh 失败"
+    exit 1
+}
 chmod +x "${INSTALL_DIR}/claude-auth.sh"
 log_success "claude-auth.sh"
 
 wget -q --show-progress -O "${INSTALL_DIR}/claude-verify.sh" \
-    "${RAW_BASE}/claude-verify.sh"
+    "${RAW_BASE}/claude-verify.sh" || {
+    log_error "下载 claude-verify.sh 失败"
+    exit 1
+}
 chmod +x "${INSTALL_DIR}/claude-verify.sh"
 log_success "claude-verify.sh"
 
@@ -50,13 +63,13 @@ log_success "claude-verify.sh"
 # ==============================
 log_step "查找最新 tar.gz 包..."
 
-# 通过 GitHub API 获取 dist/ 目录下的文件列表，找最新的 tar.gz
+# 修复：同样去掉 API URL 中的空格
 API_URL="https://api.github.com/repos/${REPO}/contents/dist"
 TAR_NAME=$(curl -s "$API_URL" \
     | grep '"name"' \
     | grep 'linux_amd64\.tar\.gz' \
     | sed 's/.*"name": "\(.*\)".*/\1/' \
-    | sort | tail -1)
+    | sort | tail -1) || true
 
 if [[ -z "$TAR_NAME" ]]; then
     log_error "未找到 dist/ 下的 tar.gz 包，请检查仓库"
@@ -65,7 +78,10 @@ fi
 
 log_step "拉取 ${TAR_NAME}..."
 wget -q --show-progress -O "${INSTALL_DIR}/${TAR_NAME}" \
-    "${RAW_BASE}/dist/${TAR_NAME}"
+    "${RAW_BASE}/dist/${TAR_NAME}" || {
+    log_error "下载 ${TAR_NAME} 失败"
+    exit 1
+}
 log_success "${TAR_NAME}"
 
 # ==============================
