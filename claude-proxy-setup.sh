@@ -126,6 +126,7 @@ systemctl restart caddy
 # 7. 启动 ProxyCore
 # ==============================
 echo "=== 7. 启动 ProxyCore ==="
+loginctl enable-linger root
 systemctl --user enable proxycore.service
 systemctl --user start proxycore.service
 systemctl --user status proxycore.service --no-pager
