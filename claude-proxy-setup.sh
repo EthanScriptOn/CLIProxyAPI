@@ -88,7 +88,7 @@ max-retry-interval: 30
 
 remote-management:
   allow-remote: true
-  secret-key: "\$2y\$10\$kVqNL6TpN/WuqiSR8sJiFOpHac1Vy5s/tEYN2j.wIVlPW5US.nkAu"
+  secret-key: "$DOMAIN"
   disable-control-panel: false
 
 usage-statistics-enabled: true
