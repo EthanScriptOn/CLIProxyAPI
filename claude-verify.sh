@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# CLIProxyAPI 验证脚本
+# ProxyCore 验证脚本
 # 授权完成后运行，验证服务是否正常工作
 
 PROXY_API_KEY="sk-proxy-eoEgBNSGZ6eWYkYGSJlUaOFk9ZmTRTTQnfZyoTxGQ"
 
-echo "=== 验证 CLIProxyAPI 服务 ==="
+echo "=== 验证 ProxyCore 服务 ==="
 RESPONSE=$(curl -s http://localhost:8080/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $PROXY_API_KEY" \

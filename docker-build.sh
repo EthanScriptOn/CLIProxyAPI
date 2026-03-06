@@ -44,7 +44,7 @@ check_container_running() {
   port=$(get_port)
 
   if ! curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" | grep -q "200"; then
-    echo "Error: cli-proxy-api service is not responding at localhost:${port}"
+    echo "Error: proxycore service is not responding at localhost:${port}"
     echo "Please start the container first or use without --with-usage flag."
     exit 1
   fi
@@ -150,7 +150,7 @@ case "$choice" in
     echo "----------------------------------------"
 
     # Build and start the services with a local-only image tag
-    export CLI_PROXY_IMAGE="cli-proxy-api:local"
+    export CLI_PROXY_IMAGE="proxycore:local"
 
     echo "Building the Docker image..."
     docker compose build \

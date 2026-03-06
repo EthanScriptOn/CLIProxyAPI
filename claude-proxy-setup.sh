@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Claude API 反向代理一键部署脚本
-# 服务: Caddy + CLIProxyAPI
+# 服务: Caddy + ProxyCore
 
 PROXY_API_KEY="sk-proxy-eoEgBNSGZ6eWYkYGSJlUaOFk9ZmTRTTQnfZyoTxGQ"
-CLI_PROXY_DIR="/root/cliproxyapi"
+CLI_PROXY_DIR="/root/proxycore"
 
 # 动态读取域名
 while true; do
@@ -49,27 +49,27 @@ if ! command -v caddy &>/dev/null; then
 fi
 
 # ==============================
-# 2. 安装 CLIProxyAPI
+# 2. 安装 ProxyCore
 # ==============================
-echo "=== 2. 检查 CLIProxyAPI ==="
-if [ -f "$CLI_PROXY_DIR/cli-proxy-api" ]; then
-    if ask_reinstall "CLIProxyAPI"; then
+echo "=== 2. 检查 ProxyCore ==="
+if [ -f "$CLI_PROXY_DIR/proxycore" ]; then
+    if ask_reinstall "ProxyCore"; then
         rm -rf "$CLI_PROXY_DIR"
     else
-        echo "跳过 CLIProxyAPI 安装"
+        echo "跳过 ProxyCore 安装"
     fi
 fi
 
-if [ ! -f "$CLI_PROXY_DIR/cli-proxy-api" ]; then
-    echo "安装 CLIProxyAPI..."
-    CLI_PROXY_DIR="$CLI_PROXY_DIR" bash "$(dirname "$0")/cliproxyapi-installer.sh"
-    echo "CLIProxyAPI 安装完成"
+if [ ! -f "$CLI_PROXY_DIR/proxycore" ]; then
+    echo "安装 ProxyCore..."
+    CLI_PROXY_DIR="$CLI_PROXY_DIR" bash "$(dirname "$0")/proxycore-installer.sh"
+    echo "ProxyCore 安装完成"
 fi
 
 # ==============================
-# 3. 配置 CLIProxyAPI
+# 3. 配置 ProxyCore
 # ==============================
-echo "=== 3. 配置 CLIProxyAPI ==="
+echo "=== 3. 配置 ProxyCore ==="
 cat > $CLI_PROXY_DIR/config.yaml <<EOF
 host: "0.0.0.0"
 port: 8080
@@ -77,7 +77,7 @@ port: 8080
 api-keys:
   - "$PROXY_API_KEY"
 
-auth-dir: "/root/.cli-proxy-api"
+auth-dir: "/root/.proxycore"
 
 debug: false
 logging-to-file: true
@@ -123,12 +123,12 @@ systemctl enable caddy
 systemctl restart caddy
 
 # ==============================
-# 7. 启动 CLIProxyAPI
+# 7. 启动 ProxyCore
 # ==============================
-echo "=== 7. 启动 CLIProxyAPI ==="
-systemctl --user enable cliproxyapi.service
-systemctl --user start cliproxyapi.service
-systemctl --user status cliproxyapi.service --no-pager
+echo "=== 7. 启动 ProxyCore ==="
+systemctl --user enable proxycore.service
+systemctl --user start proxycore.service
+systemctl --user status proxycore.service --no-pager
 
 echo ""
 echo "=== 部署完成 ==="

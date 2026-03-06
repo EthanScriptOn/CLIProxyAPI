@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# 从 GitHub 拉取 CLIProxyAPI 所有部署文件
+# 从 GitHub 拉取 ProxyCore 所有部署文件
 # 在服务器上执行，拉取完成后运行 claude-proxy-setup.sh
 
 set -euo pipefail
 
 REPO="EthanScriptOn/CLIProxyAPI"
 RAW_BASE="https://github.com/${REPO}/raw/main"
-INSTALL_DIR="/root/cliproxyapi"
+INSTALL_DIR="/root/proxycore"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -25,10 +25,10 @@ mkdir -p "$INSTALL_DIR"
 # ==============================
 log_step "拉取部署脚本..."
 
-wget -q --show-progress -O "${INSTALL_DIR}/cliproxyapi-installer.sh" \
-    "${RAW_BASE}/cliproxyapi-installer.sh"
-chmod +x "${INSTALL_DIR}/cliproxyapi-installer.sh"
-log_success "cliproxyapi-installer.sh"
+wget -q --show-progress -O "${INSTALL_DIR}/proxycore-installer.sh" \
+    "${RAW_BASE}/proxycore-installer.sh"
+chmod +x "${INSTALL_DIR}/proxycore-installer.sh"
+log_success "proxycore-installer.sh"
 
 wget -q --show-progress -O "${INSTALL_DIR}/claude-proxy-setup.sh" \
     "${RAW_BASE}/claude-proxy-setup.sh"

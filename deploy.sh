@@ -7,7 +7,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${PROJECT_DIR}/.deploy_build"
 DIST_DIR="${PROJECT_DIR}/dist"
-BINARY_NAME="cli-proxy-api"
+BINARY_NAME="proxycore"
 
 # 颜色
 RED='\033[0;31m'
@@ -70,7 +70,7 @@ VERSION=$(git -C "$PROJECT_DIR" describe --tags --exact-match 2>/dev/null \
     || date +%Y%m%d)
 VERSION="${VERSION#v}"
 
-PACKAGE_NAME="CLIProxyAPI_${VERSION}_linux_amd64.tar.gz"
+PACKAGE_NAME="ProxyCore_${VERSION}_linux_amd64.tar.gz"
 
 mkdir -p "$DIST_DIR"
 PACKAGE_PATH="${DIST_DIR}/${PACKAGE_NAME}"
@@ -98,11 +98,11 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "产物路径: ${PACKAGE_PATH}"
 echo ""
-echo -e "请手动上传以下文件到服务器 /root/cliproxyapi/："
+echo -e "请手动上传以下文件到服务器 /root/proxycore/："
 echo -e "  ${PACKAGE_PATH}"
-echo -e "  ${PROJECT_DIR}/cliproxyapi-installer.sh"
+echo -e "  ${PROJECT_DIR}/proxycore-installer.sh"
 echo -e "  ${PROJECT_DIR}/claude-proxy-setup.sh"
 echo ""
 echo -e "上传后在服务器执行:"
-echo -e "  bash /root/cliproxyapi/claude-proxy-setup.sh"
+echo -e "  bash /root/proxycore/claude-proxy-setup.sh"
 echo ""

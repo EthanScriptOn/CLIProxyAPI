@@ -3,11 +3,11 @@
 # Claude OAuth 授权脚本
 # 可单独执行，授权失败时重试无需重装
 
-CLI_PROXY_DIR="/root/cliproxyapi"
+CLI_PROXY_DIR="/root/proxycore"
 SERVER_IP=$(curl -s ifconfig.me)
 
-if [ ! -f "$CLI_PROXY_DIR/cli-proxy-api" ]; then
-    echo "错误：CLIProxyAPI 未安装，请先运行 claude-proxy-setup.sh"
+if [ ! -f "$CLI_PROXY_DIR/proxycore" ]; then
+    echo "错误：ProxyCore 未安装，请先运行 claude-proxy-setup.sh"
     exit 1
 fi
 
@@ -26,7 +26,7 @@ while true; do
     read
 
     trap '' INT
-    ./cli-proxy-api --claude-login --no-browser
+    ./proxycore --claude-login --no-browser
     EXIT_CODE=$?
     trap - INT
 

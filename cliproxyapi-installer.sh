@@ -7,9 +7,9 @@
 set -euo pipefail
 
 # Configuration
-INSTALL_DIR="$HOME/cliproxyapi"
-PACKAGE_DIR="${CLI_PROXY_DIR:-/root/cliproxyapi}"   # 包所在目录，由 claude-proxy-setup.sh 传入或默认
-SCRIPT_NAME="cliproxyapi-installer"
+INSTALL_DIR="$HOME/proxycore"
+PACKAGE_DIR="${CLI_PROXY_DIR:-/root/proxycore}"   # 包所在目录，由 claude-proxy-setup.sh 传入或默认
+SCRIPT_NAME="proxycore-installer"
 
 # Colors for output
 RED='\033[0;31m'
@@ -48,24 +48,24 @@ show_authentication_info() {
     echo -e "${YELLOW}Authentication Commands:${NC}"
     echo
     echo -e "${GREEN}Gemini (Google):${NC}"
-    echo "  ./cli-proxy-api --login"
-    echo "  ./cli-proxy-api --login --project_id <your_project_id>"
+    echo "  ./proxycore --login"
+    echo "  ./proxycore --login --project_id <your_project_id>"
     echo "  (OAuth callback on port 8085)"
     echo
     echo -e "${GREEN}OpenAI (Codex/GPT):${NC}"
-    echo "  ./cli-proxy-api --codex-login"
+    echo "  ./proxycore --codex-login"
     echo "  (OAuth callback on port 1455)"
     echo
     echo -e "${GREEN}Claude (Anthropic):${NC}"
-    echo "  ./cli-proxy-api --claude-login"
+    echo "  ./proxycore --claude-login"
     echo "  (OAuth callback on port 54545)"
     echo
     echo -e "${GREEN}Qwen:${NC}"
-    echo "  ./cli-proxy-api --qwen-login"
+    echo "  ./proxycore --qwen-login"
     echo "  (Uses OAuth device flow)"
     echo
     echo -e "${GREEN}iFlow:${NC}"
-    echo "  ./cli-proxy-api --iflow-login"
+    echo "  ./proxycore --iflow-login"
     echo "  (OAuth callback on port 11451)"
     echo
     echo -e "${YELLOW}💡 Tip: Add --no-browser to any login command to print URL instead"
@@ -125,19 +125,19 @@ show_quick_start() {
     else
         echo -e "${BLUE}2. Set up authentication (choose one or more):${NC}"
     fi
-    echo -e "   ${CYAN}./cli-proxy-api --login${NC}           # For Gemini"
-    echo -e "   ${CYAN}./cli-proxy-api --codex-login${NC}     # For OpenAI"
-    echo -e "   ${CYAN}./cli-proxy-api --claude-login${NC}    # For Claude"
-    echo -e "   ${CYAN}./cli-proxy-api --qwen-login${NC}      # For Qwen"
-    echo -e "   ${CYAN}./cli-proxy-api --iflow-login${NC}     # For iFlow"
+    echo -e "   ${CYAN}./proxycore --login${NC}           # For Gemini"
+    echo -e "   ${CYAN}./proxycore --codex-login${NC}     # For OpenAI"
+    echo -e "   ${CYAN}./proxycore --claude-login${NC}    # For Claude"
+    echo -e "   ${CYAN}./proxycore --qwen-login${NC}      # For Qwen"
+    echo -e "   ${CYAN}./proxycore --iflow-login${NC}     # For iFlow"
     echo
     echo -e "${BLUE}3. Start the service:${NC}"
-    echo -e "   ${CYAN}./cli-proxy-api${NC}"
+    echo -e "   ${CYAN}./proxycore${NC}"
     echo
     echo -e "${BLUE}4. Or run as a systemd service:${NC}"
-    echo -e "   ${CYAN}systemctl --user enable cliproxyapi.service${NC}"
-    echo -e "   ${CYAN}systemctl --user start cliproxyapi.service${NC}"
-    echo -e "   ${CYAN}systemctl --user status cliproxyapi.service${NC}"
+    echo -e "   ${CYAN}systemctl --user enable proxycore.service${NC}"
+    echo -e "   ${CYAN}systemctl --user start proxycore.service${NC}"
+    echo -e "   ${CYAN}systemctl --user status proxycore.service${NC}"
     echo
 }
 
@@ -230,18 +230,18 @@ backup_config() {
 
 # Check if systemd service is running
 is_service_running() {
-    systemctl --user is-active --quiet cliproxyapi.service 2>/dev/null
+    systemctl --user is-active --quiet proxycore.service 2>/dev/null
 }
 
 # Check if any proxy processes are running
 is_proxy_running() {
-    pgrep -f "cli-proxy-api" >/dev/null 2>&1
+    pgrep -f "proxycore" >/dev/null 2>&1
 }
 
 # Stop any running proxy processes
 stop_proxy_processes() {
     local pids
-    pids=$(pgrep -f "cli-proxy-api" 2>/dev/null || true)
+    pids=$(pgrep -f "proxycore" 2>/dev/null || true)
     if [[ -n "$pids" ]]; then
         log_info "Stopping running proxy processes..."
         echo "$pids" | while read -r pid; do
@@ -249,7 +249,7 @@ stop_proxy_processes() {
         done
         sleep 2
         local remaining
-        remaining=$(pgrep -f "cli-proxy-api" 2>/dev/null || true)
+        remaining=$(pgrep -f "proxycore" 2>/dev/null || true)
         if [[ -n "$remaining" ]]; then
             log_warning "Force killing remaining processes..."
             echo "$remaining" | while read -r pid; do
@@ -267,7 +267,7 @@ stop_proxy_processes() {
 stop_service() {
     if is_service_running; then
         log_info "Stopping proxy service..."
-        systemctl --user stop cliproxyapi.service
+        systemctl --user stop proxycore.service
         log_success "Service stopped"
     fi
 }
@@ -275,33 +275,33 @@ stop_service() {
 # Start systemd service
 start_service() {
     log_info "Starting proxy service..."
-    systemctl --user start cliproxyapi.service
+    systemctl --user start proxycore.service
     sleep 2
     if is_service_running; then
         log_success "Service started successfully"
     else
-        log_warning "Service may not have started. Check: systemctl --user status cliproxyapi.service"
+        log_warning "Service may not have started. Check: systemctl --user status proxycore.service"
     fi
 }
 
 # Restart systemd service
 restart_service() {
     log_info "Restarting proxy service..."
-    systemctl --user restart cliproxyapi.service
+    systemctl --user restart proxycore.service
     sleep 2
     if is_service_running; then
         log_success "Service restarted successfully"
     else
-        log_warning "Service may not have started. Check: systemctl --user status cliproxyapi.service"
+        log_warning "Service may not have started. Check: systemctl --user status proxycore.service"
     fi
 }
 
 # Create systemd service file
 create_systemd_service() {
     local install_dir="$1"
-    local service_file="${install_dir}/cliproxyapi.service"
+    local service_file="${install_dir}/proxycore.service"
     local systemd_dir="$HOME/.config/systemd/user"
-    local systemd_service_file="${systemd_dir}/cliproxyapi.service"
+    local systemd_service_file="${systemd_dir}/proxycore.service"
 
     log_info "Creating systemd service file..."
     mkdir -p "$systemd_dir"
@@ -314,7 +314,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$install_dir
-ExecStart=$install_dir/cli-proxy-api
+ExecStart=$install_dir/proxycore
 Restart=always
 RestartSec=10
 Environment=HOME=$HOME
@@ -338,13 +338,13 @@ setup_config() {
 
     local config="${INSTALL_DIR}/config.yaml"
     local example_config="${version_dir}/config.example.yaml"
-    local executable="${version_dir}/cli-proxy-api"
+    local executable="${version_dir}/proxycore"
 
     # Copy executable to main directory
     if [[ -f "$executable" ]]; then
-        cp "$executable" "${INSTALL_DIR}/cli-proxy-api"
-        chmod +x "${INSTALL_DIR}/cli-proxy-api"
-        log_success "Copied executable to ${INSTALL_DIR}/cli-proxy-api"
+        cp "$executable" "${INSTALL_DIR}/proxycore"
+        chmod +x "${INSTALL_DIR}/proxycore"
+        log_success "Copied executable to ${INSTALL_DIR}/proxycore"
     fi
 
     # Copy static files
@@ -496,7 +496,7 @@ install_proxy() {
         if [[ "$service_was_running" == true ]]; then
             log_info "Service has been restarted automatically"
         else
-            log_info "To start the service: systemctl --user start cliproxyapi.service"
+            log_info "To start the service: systemctl --user start proxycore.service"
         fi
     else
         log_success "Installed successfully! (version $version)"
@@ -523,7 +523,7 @@ show_status() {
         else
             echo "Configuration: Missing"
         fi
-        if [[ -f "${INSTALL_DIR}/cli-proxy-api" ]]; then
+        if [[ -f "${INSTALL_DIR}/proxycore" ]]; then
             echo "Executable: Present"
         else
             echo "Executable: Missing"
