@@ -161,18 +161,16 @@ fetch_from_github() {
 # 3. 创建单个实例
 # ==============================
 create_instance() {
-    local name=$1
+    local domain=$1
     local port=$2
-    local domain=$3
-    local api_key=$4
-    local mgmt_key=$5
+    local api_key=$3
 
     local install_dir="/root/proxycore-${domain}"
     local auth_dir="/root/.proxycore-${domain}"
-    local service_name="proxycore-${name}"
+    local service_name="proxycore-${domain}"
     local systemd_dir="${HOME}/.config/systemd/user"
 
-    log_info "创建实例 [${name}]  端口:${port}  域名:${domain}"
+    log_info "创建实例 [${domain}]  端口:${port}"
 
     mkdir -p "${install_dir}" "${auth_dir}" "${systemd_dir}"
 
@@ -203,7 +201,7 @@ max-retry-interval: 30
 
 remote-management:
   allow-remote: true
-  secret-key: "${mgmt_key}"
+  secret-key: "${domain}"
   disable-control-panel: false
 
 usage-statistics-enabled: true
@@ -212,7 +210,7 @@ EOF
     # systemd service
     cat > "${systemd_dir}/${service_name}.service" << EOF
 [Unit]
-Description=Proxy API Service (${name})
+Description=Proxy API Service (${domain})
 After=network.target
 
 [Service]
@@ -234,9 +232,9 @@ EOF
 
     sleep 2
     if systemctl --user is-active --quiet "${service_name}.service"; then
-        log_success "实例 [${name}] 服务已启动"
+        log_success "实例 [${domain}] 服务已启动"
     else
-        log_warn "实例 [${name}] 服务可能未启动，请检查: systemctl --user status ${service_name}.service"
+        log_warn "实例 [${domain}] 服务可能未启动，请检查: systemctl --user status ${service_name}.service"
     fi
 }
 
@@ -295,7 +293,6 @@ main() {
         echo "请输入大于 0 的整数"
     done
 
-    declare -a INST_NAMES=()
     declare -a INST_PORTS=()
     declare -a INST_DOMAINS=()
     declare -a INST_KEYS=()
@@ -304,14 +301,6 @@ main() {
     for i in $(seq 1 "$count"); do
         echo ""
         echo "--- 实例 ${i}/${count} ---"
-
-        local name
-        while true; do
-            read -rp "实例名称（字母/数字，如 node${i}）: " name
-            name="${name// /}"
-            [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "名称只能包含字母、数字、- 和 _"; continue; }
-            break
-        done
 
         local default_port=$((8080 + i))
         local port
@@ -326,7 +315,7 @@ main() {
 
         local domain
         while true; do
-            read -rp "域名（如 node${i}.example.com）: " domain
+            read -rp "域名（如 n${i}.myclaudeproxy.xyz）: " domain
             domain="${domain// /}"
             [[ -n "$domain" ]] || { echo "域名不能为空"; continue; }
             instance_exists "$domain" && { echo "域名 ${domain} 的实例已存在，请换一个"; continue; }
@@ -337,12 +326,11 @@ main() {
         read -rp "API Key（留空自动生成）: " api_key
         api_key="${api_key:-$(generate_api_key)}"
 
-        INST_NAMES+=("$name")
         INST_PORTS+=("$port")
         INST_DOMAINS+=("$domain")
         INST_KEYS+=("$api_key")
 
-        create_instance "$name" "$port" "$domain" "$api_key" "$domain"
+        create_instance "$domain" "$port" "$api_key"
         append_caddy_block "$domain" "$port"
     done
 
@@ -369,24 +357,23 @@ main() {
     echo "========================================"
     echo -e "${GREEN}  部署完成！实例汇总${NC}"
     echo "========================================"
-    for i in "${!INST_NAMES[@]}"; do
-        local n="${INST_NAMES[$i]}"
+    for i in "${!INST_DOMAINS[@]}"; do
         local d="${INST_DOMAINS[$i]}"
         echo ""
-        echo -e "${CYAN}▶ 实例: ${n}${NC}"
+        echo -e "${CYAN}▶ ${d}${NC}"
         echo "  代理地址 : https://${d}"
         echo "  API Key  : ${INST_KEYS[$i]}"
         echo "  工作目录 : /root/proxycore-${d}"
         echo "  Auth目录 : /root/.proxycore-${d}"
-        echo "  服务名   : proxycore-${n}.service"
+        echo "  服务名   : proxycore-${d}.service"
         echo "  端口     : ${INST_PORTS[$i]}"
         echo ""
         echo "  授权账号 :"
         echo "    cd /root/proxycore-${d} && ./proxycore --claude-login"
         echo "  查看状态 :"
-        echo "    systemctl --user status proxycore-${n}.service"
+        echo "    systemctl --user status proxycore-${d}.service"
         echo "  查看日志 :"
-        echo "    journalctl --user -u proxycore-${n}.service -f"
+        echo "    journalctl --user -u proxycore-${d}.service -f"
     done
     echo ""
 }
