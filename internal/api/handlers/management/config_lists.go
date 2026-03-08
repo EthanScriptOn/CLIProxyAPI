@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	configaccess "proxycore/api/v6/internal/access/config_access"
 	"proxycore/api/v6/internal/config"
+	sdkaccess "proxycore/api/v6/sdk/access"
 )
 
 // Generic helpers for list[string]
@@ -109,13 +111,20 @@ func (h *Handler) GetAPIKeys(c *gin.Context) { c.JSON(200, gin.H{"api-keys": h.c
 func (h *Handler) PutAPIKeys(c *gin.Context) {
 	h.putStringList(c, func(v []string) {
 		h.cfg.APIKeys = append([]string(nil), v...)
-	}, nil)
+	}, func() { h.refreshAccessKeys() })
 }
 func (h *Handler) PatchAPIKeys(c *gin.Context) {
-	h.patchStringList(c, &h.cfg.APIKeys, func() {})
+	h.patchStringList(c, &h.cfg.APIKeys, func() { h.refreshAccessKeys() })
 }
 func (h *Handler) DeleteAPIKeys(c *gin.Context) {
-	h.deleteFromStringList(c, &h.cfg.APIKeys, func() {})
+	h.deleteFromStringList(c, &h.cfg.APIKeys, func() { h.refreshAccessKeys() })
+}
+
+func (h *Handler) refreshAccessKeys() {
+	configaccess.Register(&h.cfg.SDKConfig)
+	if h.accessManager != nil {
+		h.accessManager.SetProviders(sdkaccess.RegisteredProviders())
+	}
 }
 
 // gemini-api-key: []GeminiKey

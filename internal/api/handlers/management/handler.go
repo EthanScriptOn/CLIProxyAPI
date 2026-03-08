@@ -17,6 +17,7 @@ import (
 	"proxycore/api/v6/internal/config"
 	"proxycore/api/v6/internal/usage"
 	sdkAuth "proxycore/api/v6/sdk/auth"
+	sdkaccess "proxycore/api/v6/sdk/access"
 	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -41,6 +42,7 @@ type Handler struct {
 	attemptsMu          sync.Mutex
 	failedAttempts      map[string]*attemptInfo // keyed by client IP
 	authManager         *coreauth.Manager
+	accessManager       *sdkaccess.Manager
 	usageStats          *usage.RequestStatistics
 	tokenStore          coreauth.Store
 	localPassword       string
@@ -112,6 +114,9 @@ func (h *Handler) SetAuthManager(manager *coreauth.Manager) { h.authManager = ma
 
 // SetUsageStatistics allows replacing the usage statistics reference.
 func (h *Handler) SetUsageStatistics(stats *usage.RequestStatistics) { h.usageStats = stats }
+
+// SetAccessManager sets the access manager used to propagate api-key changes at runtime.
+func (h *Handler) SetAccessManager(m *sdkaccess.Manager) { h.accessManager = m }
 
 // SetLocalPassword configures the runtime-local password accepted for localhost requests.
 func (h *Handler) SetLocalPassword(password string) { h.localPassword = password }
