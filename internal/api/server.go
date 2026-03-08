@@ -1030,8 +1030,8 @@ func (s *Server) SetWebsocketAuthChangeHandler(fn func(bool, bool)) {
 // (management handlers moved to internal/api/handlers/management)
 
 // AuthMiddleware returns a Gin middleware handler that authenticates requests
-// using the configured authentication providers. When no providers are available,
-// it allows all requests (legacy behaviour).
+// using the configured authentication providers. When no providers are configured,
+// all requests are rejected with 401.
 func AuthMiddleware(manager *sdkaccess.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if manager == nil {
