@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"proxycore/api/v6/internal/config"
 	"proxycore/api/v6/internal/util"
 	sdkconfig "proxycore/api/v6/sdk/config"
@@ -324,5 +325,38 @@ func (h *Handler) PutProxyURL(c *gin.Context) {
 }
 func (h *Handler) DeleteProxyURL(c *gin.Context) {
 	h.cfg.ProxyURL = ""
+	h.persist(c)
+}
+
+// ChangeSecretKey handles POST /change-secret-key.
+// The request is already authenticated by Middleware() with the current key,
+// so only the new key is required in the request body.
+func (h *Handler) ChangeSecretKey(c *gin.Context) {
+	if h.envSecret != "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "management key is controlled by the MANAGEMENT_PASSWORD environment variable and cannot be changed via API"})
+		return
+	}
+
+	var body struct {
+		NewKey string `json:"newKey"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	newKey := strings.TrimSpace(body.NewKey)
+	if len(newKey) < 8 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "new key must be at least 8 characters"})
+		return
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newKey), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to hash key: %v", err)})
+		return
+	}
+
+	h.cfg.RemoteManagement.SecretKey = string(hashed)
 	h.persist(c)
 }
