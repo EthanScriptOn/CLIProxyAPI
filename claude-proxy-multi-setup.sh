@@ -90,13 +90,25 @@ ensure_caddy() {
         return
     fi
     log_step "安装 Caddy..."
-    apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-        | tee /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update
-    apt-get install -y caddy
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+            | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+            | tee /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update
+        apt-get install -y caddy
+    elif command -v dnf &>/dev/null; then
+        dnf install -y 'dnf-command(copr)'
+        dnf copr enable -y @caddy/caddy
+        dnf install -y caddy
+    elif command -v yum &>/dev/null; then
+        yum install -y yum-plugin-copr
+        yum copr enable -y @caddy/caddy
+        yum install -y caddy
+    else
+        log_error "不支持的包管理器，请手动安装 Caddy"
+    fi
     systemctl enable caddy
     systemctl start caddy
     log_success "Caddy 安装完成"
@@ -168,7 +180,7 @@ create_instance() {
     local install_dir="/root/proxycore-${domain}"
     local auth_dir="/root/.proxycore-${domain}"
     local service_name="proxycore-${domain}"
-    local systemd_dir="${HOME}/.config/systemd/user"
+    local systemd_dir="/etc/systemd/system"
 
     log_info "创建实例 [${domain}]  端口:${port}"
 
@@ -226,15 +238,15 @@ WantedBy=default.target
 EOF
 
     loginctl enable-linger root 2>/dev/null || true
-    systemctl --user daemon-reload
-    systemctl --user enable "${service_name}.service"
-    systemctl --user start "${service_name}.service"
+    systemctl daemon-reload
+    systemctl enable "${service_name}.service"
+    systemctl start "${service_name}.service"
 
     sleep 2
-    if systemctl --user is-active --quiet "${service_name}.service"; then
+    if systemctl is-active --quiet "${service_name}.service"; then
         log_success "实例 [${domain}] 服务已启动"
     else
-        log_warn "实例 [${domain}] 服务可能未启动，请检查: systemctl --user status ${service_name}.service"
+        log_warn "实例 [${domain}] 服务可能未启动，请检查: systemctl status ${service_name}.service"
     fi
 }
 
@@ -346,10 +358,14 @@ main() {
         systemctl restart caddy && log_success "Caddy 重启完成"
     fi
 
-    # 开放防火墙（如有 ufw）
+    # 开放防火墙
     if command -v ufw &>/dev/null; then
         ufw allow 80/tcp  2>/dev/null || true
         ufw allow 443/tcp 2>/dev/null || true
+    elif command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --permanent --add-service=http  2>/dev/null || true
+        firewall-cmd --permanent --add-service=https 2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
     fi
 
     # 汇总
@@ -371,9 +387,9 @@ main() {
         echo "  授权账号 :"
         echo "    cd /root/proxycore-${d} && ./proxycore --claude-login"
         echo "  查看状态 :"
-        echo "    systemctl --user status proxycore-${d}.service"
+        echo "    systemctl status proxycore-${d}.service"
         echo "  查看日志 :"
-        echo "    journalctl --user -u proxycore-${d}.service -f"
+        echo "    journalctl -u proxycore-${d}.service -f"
     done
     echo ""
 }
