@@ -127,6 +127,25 @@ func (h *Handler) refreshAccessKeys() {
 	}
 }
 
+// api-key-quotas
+func (h *Handler) GetAPIKeyQuotas(c *gin.Context) {
+	quotas := h.cfg.APIKeyQuotas
+	if quotas == nil {
+		quotas = map[string]float64{}
+	}
+	c.JSON(200, gin.H{"api-key-quotas": quotas})
+}
+
+func (h *Handler) PutAPIKeyQuotas(c *gin.Context) {
+	var body map[string]float64
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid body"})
+		return
+	}
+	h.cfg.APIKeyQuotas = body
+	h.persist(c)
+}
+
 // gemini-api-key: []GeminiKey
 func (h *Handler) GetGeminiKeys(c *gin.Context) {
 	c.JSON(200, gin.H{"gemini-api-key": h.cfg.GeminiKey})

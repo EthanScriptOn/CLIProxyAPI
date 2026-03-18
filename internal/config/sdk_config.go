@@ -20,6 +20,15 @@ type SDKConfig struct {
 	// APIKeys is a list of keys for authenticating clients to this proxy server.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 
+	// APIKeyQuotas defines optional token quotas (in millions) for each client API key.
+	// Key is the API key string, value is the quota in millions of tokens (0 means unlimited).
+	APIKeyQuotas map[string]float64 `yaml:"api-key-quotas,omitempty" json:"api-key-quotas,omitempty"`
+
+	// APIKeyQuotaMinRemaining defines the minimum remaining tokens (in millions) required to allow a request.
+	// When a key's remaining quota drops below this threshold, requests are rejected with 429.
+	// Default is 0.5 (500,000 tokens). Set to 0 to disable the check.
+	APIKeyQuotaMinRemaining float64 `yaml:"api-key-quota-min-remaining,omitempty" json:"api-key-quota-min-remaining,omitempty"`
+
 	// PassthroughHeaders controls whether upstream response headers are forwarded to downstream clients.
 	// Default is false (disabled).
 	PassthroughHeaders bool `yaml:"passthrough-headers" json:"passthrough-headers"`

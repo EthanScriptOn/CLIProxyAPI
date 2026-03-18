@@ -10,7 +10,7 @@ docker-compose.yml
 Dockerfile
 
 # Documentation and license
-docs/*
+../docs/*
 README.md
 README_CN.md
 LICENSE

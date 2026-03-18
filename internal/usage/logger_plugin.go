@@ -139,6 +139,24 @@ var defaultRequestStatistics = NewRequestStatistics()
 // GetRequestStatistics returns the shared statistics store.
 func GetRequestStatistics() *RequestStatistics { return defaultRequestStatistics }
 
+// GetUsedTokensForKey returns the total tokens consumed by the given API key.
+func GetUsedTokensForKey(apiKey string) int64 {
+	return defaultRequestStatistics.UsedTokensForKey(apiKey)
+}
+
+// UsedTokensForKey returns the total tokens consumed by the given API key.
+func (s *RequestStatistics) UsedTokensForKey(apiKey string) int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if stats, ok := s.apis[apiKey]; ok {
+		return stats.TotalTokens
+	}
+	return 0
+}
+
 // NewRequestStatistics constructs an empty statistics store.
 func NewRequestStatistics() *RequestStatistics {
 	return &RequestStatistics{

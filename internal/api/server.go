@@ -328,6 +328,7 @@ func (s *Server) setupRoutes() {
 	// OpenAI compatible API routes
 	v1 := s.engine.Group("/v1")
 	v1.Use(AuthMiddleware(s.accessManager))
+	v1.Use(s.QuotaMiddleware())
 	{
 		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
 		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
@@ -342,6 +343,7 @@ func (s *Server) setupRoutes() {
 	// Gemini compatible API routes
 	v1beta := s.engine.Group("/v1beta")
 	v1beta.Use(AuthMiddleware(s.accessManager))
+	v1beta.Use(s.QuotaMiddleware())
 	{
 		v1beta.GET("/models", geminiHandlers.GeminiModels)
 		v1beta.POST("/models/*action", geminiHandlers.GeminiHandler)
@@ -534,6 +536,9 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
 		mgmt.PATCH("/api-keys", s.mgmt.PatchAPIKeys)
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
+
+		mgmt.GET("/api-key-quotas", s.mgmt.GetAPIKeyQuotas)
+		mgmt.PUT("/api-key-quotas", s.mgmt.PutAPIKeyQuotas)
 
 		mgmt.GET("/gemini-api-key", s.mgmt.GetGeminiKeys)
 		mgmt.PUT("/gemini-api-key", s.mgmt.PutGeminiKeys)
@@ -1029,7 +1034,57 @@ func (s *Server) SetWebsocketAuthChangeHandler(fn func(bool, bool)) {
 
 // (management handlers moved to internal/api/handlers/management)
 
-// AuthMiddleware returns a Gin middleware handler that authenticates requests
+// QuotaMiddleware returns a Gin middleware that enforces per-API-key token quotas.
+// If a key has a configured quota and remaining tokens < 500_000, the request is rejected with 429.
+func (s *Server) QuotaMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		apiKey, exists := c.Get("apiKey")
+		if !exists {
+			c.Next()
+			return
+		}
+		key, ok := apiKey.(string)
+		if !ok || key == "" {
+			c.Next()
+			return
+		}
+		quotas := s.cfg.APIKeyQuotas
+		if len(quotas) == 0 {
+			c.Next()
+			return
+		}
+		quota, hasQuota := quotas[key]
+		if !hasQuota || quota <= 0 {
+			c.Next()
+			return
+		}
+		usedTokens := usage.GetUsedTokensForKey(key)
+		quotaTokens := int64(quota * 1_000_000)
+		remaining := quotaTokens - usedTokens
+		minRemaining := s.cfg.APIKeyQuotaMinRemaining
+		if minRemaining <= 0 {
+			minRemaining = 0.5
+		}
+		minRemainingTokens := int64(minRemaining * 1_000_000)
+		if remaining < minRemainingTokens {
+			msg := fmt.Sprintf("额度不足：已用 %.2fM / 共 %.2fM token，剩余 %.2fM 低于最低要求 %.2fM，请联系管理员",
+				float64(usedTokens)/1_000_000,
+				quota,
+				float64(remaining)/1_000_000,
+				minRemaining,
+			)
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": gin.H{
+					"message": msg,
+					"type":    "rate_limit_error",
+					"code":    "rate_limit_exceeded",
+				},
+			})
+			return
+		}
+		c.Next()
+	}
+}
 // using the configured authentication providers. When no providers are configured,
 // all requests are rejected with 401.
 func AuthMiddleware(manager *sdkaccess.Manager) gin.HandlerFunc {
