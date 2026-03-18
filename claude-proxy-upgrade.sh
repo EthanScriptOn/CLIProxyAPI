@@ -10,7 +10,7 @@ REPO="EthanScriptOn/CLIProxyAPI"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 API_URL="https://api.github.com/repos/${REPO}/contents/dist"
 DOWNLOAD_DIR="/tmp/proxycore_upgrade"
-SYSTEMD_DIR="${HOME}/.config/systemd/user"
+SYSTEMD_DIR="/etc/systemd/system"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -136,12 +136,15 @@ upgrade_instance() {
     log_info "升级实例: ${domain}"
 
     # 停止服务
-    if [[ -n "$service" ]] && systemctl --user is-active --quiet "${service}.service" 2>/dev/null; then
-        systemctl --user stop "${service}.service"
+    if [[ -n "$service" ]] && systemctl is-active --quiet "${service}.service" 2>/dev/null; then
+        systemctl stop "${service}.service"
         log_success "[${domain}] 服务已停止"
+    elif [[ -n "$service" ]]; then
+        systemctl stop "${service}.service" 2>/dev/null || true
     fi
 
-    # 替换二进制
+    # 替换二进制（先删除旧文件再复制，避免 "Text file busy"）
+    rm -f "${install_dir}/proxycore"
     cp "${NEW_BIN}" "${install_dir}/proxycore"
     chmod +x "${install_dir}/proxycore"
     log_success "[${domain}] 二进制已更新"
@@ -155,12 +158,12 @@ upgrade_instance() {
 
     # 启动服务
     if [[ -n "$service" ]]; then
-        systemctl --user start "${service}.service"
+        systemctl start "${service}.service"
         sleep 1
-        if systemctl --user is-active --quiet "${service}.service"; then
+        if systemctl is-active --quiet "${service}.service"; then
             log_success "[${domain}] 服务已重新启动"
         else
-            log_warn "[${domain}] 服务可能未正常启动，请检查: systemctl --user status ${service}.service"
+            log_warn "[${domain}] 服务可能未正常启动，请检查: systemctl status ${service}.service"
         fi
     else
         log_warn "[${domain}] 未找到对应服务，请手动启动"
