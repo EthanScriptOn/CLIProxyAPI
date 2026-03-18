@@ -5,7 +5,10 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,6 +74,10 @@ type RequestStatistics struct {
 	requestsByHour map[int]int64
 	tokensByDay    map[string]int64
 	tokensByHour   map[int]int64
+
+	persistPath  string
+	persistTimer *time.Timer
+	persistMu    sync.Mutex
 }
 
 // apiStats holds aggregated metrics for a single API key.
@@ -199,7 +206,6 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 	hourKey := timestamp.Hour()
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.totalRequests++
 	if success {
@@ -226,6 +232,9 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 	s.requestsByHour[hourKey]++
 	s.tokensByDay[dayKey] += totalTokens
 	s.tokensByHour[hourKey] += totalTokens
+
+	s.mu.Unlock()
+	s.schedulePersist()
 }
 
 func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail RequestDetail) {
@@ -487,4 +496,71 @@ func formatHour(hour int) string {
 	}
 	hour = hour % 24
 	return fmt.Sprintf("%02d", hour)
+}
+
+// InitPersistence sets the persist path for the default statistics store,
+// loads any existing data from disk, and enables periodic auto-save.
+func InitPersistence(configFilePath string) {
+	if configFilePath == "" {
+		return
+	}
+	dir := filepath.Dir(configFilePath)
+	path := filepath.Join(dir, "usage_stats.json")
+	defaultRequestStatistics.persistPath = path
+	_ = defaultRequestStatistics.loadFromFile()
+}
+
+// schedulePersist debounces disk writes: resets a 5-second timer on each call.
+// Must be called without holding s.mu.
+func (s *RequestStatistics) schedulePersist() {
+	if s.persistPath == "" {
+		return
+	}
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	if s.persistTimer != nil {
+		s.persistTimer.Reset(5 * time.Second)
+		return
+	}
+	s.persistTimer = time.AfterFunc(5*time.Second, func() {
+		s.persistMu.Lock()
+		s.persistTimer = nil
+		s.persistMu.Unlock()
+		_ = s.saveToFile()
+	})
+}
+
+func (s *RequestStatistics) saveToFile() error {
+	if s == nil || s.persistPath == "" {
+		return nil
+	}
+	snapshot := s.Snapshot()
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	tmp := s.persistPath + ".tmp"
+	if err = os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.persistPath)
+}
+
+func (s *RequestStatistics) loadFromFile() error {
+	if s == nil || s.persistPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.persistPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var snapshot StatisticsSnapshot
+	if err = json.Unmarshal(data, &snapshot); err != nil {
+		return err
+	}
+	s.MergeSnapshot(snapshot)
+	return nil
 }

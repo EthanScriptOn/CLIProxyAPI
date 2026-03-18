@@ -228,7 +228,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${install_dir}
-ExecStart=${install_dir}/proxycore
+ExecStart=${install_dir}/proxycore -config ${install_dir}/config.yaml
 Restart=always
 RestartSec=10
 Environment=HOME=${HOME}

@@ -415,6 +415,7 @@ func main() {
 		}
 	}
 	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	usage.InitPersistence(configFilePath)
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 
 	if err = logging.ConfigureLogOutput(cfg); err != nil {
