@@ -361,6 +361,7 @@ func (s *Server) setupRoutes() {
 			},
 		})
 	})
+	s.engine.GET("/health", s.handleHealth)
 	s.engine.POST("/v1internal:method", geminiCLIHandlers.CLIHandler)
 
 	// OAuth callback endpoints (reuse main server port)
@@ -709,6 +710,36 @@ func (s *Server) enableKeepAlive(timeout time.Duration, onTimeout func()) {
 	s.engine.GET("/keep-alive", s.handleKeepAlive)
 
 	go s.watchKeepAlive()
+}
+
+func (s *Server) handleHealth(c *gin.Context) {
+	authManager := s.handlers.AuthManager
+	if authManager == nil {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "available": 0, "total": 0})
+		return
+	}
+	auths := authManager.List()
+	total := len(auths)
+	available := 0
+	var earliestRecover time.Time
+	for _, a := range auths {
+		if !a.Disabled && !a.Unavailable {
+			available++
+		} else if !a.NextRetryAfter.IsZero() {
+			if earliestRecover.IsZero() || a.NextRetryAfter.Before(earliestRecover) {
+				earliestRecover = a.NextRetryAfter
+			}
+		}
+	}
+	if available > 0 {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "available": available, "total": total})
+		return
+	}
+	resp := gin.H{"status": "unavailable", "available": 0, "total": total}
+	if !earliestRecover.IsZero() {
+		resp["recover_at"] = earliestRecover.UTC().Format(time.RFC3339)
+	}
+	c.JSON(http.StatusServiceUnavailable, resp)
 }
 
 func (s *Server) handleKeepAlive(c *gin.Context) {
