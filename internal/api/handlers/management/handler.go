@@ -60,6 +60,8 @@ type DBAPIKeyStore interface {
 	SaveAPIKey(ctx context.Context, r APIKeyRecord) error
 	DeleteAPIKey(ctx context.Context, key string) error
 	QueryUsageAggregate(ctx context.Context, params UsageAggregateParams) ([]UsageAggregateRow, error)
+	ListNodes(ctx context.Context) ([]string, error)
+	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)
 }
 
 // NewHandler creates a new management handler instance.

@@ -6,6 +6,7 @@ import (
 	management "proxycore/api/v6/internal/api/handlers/management"
 	"proxycore/api/v6/internal/store"
 	"proxycore/api/v6/internal/usage"
+	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 )
 
 // pgStoreAdapter bridges store.PostgresStore to the management.DBAPIKeyStore interface.
@@ -76,6 +77,15 @@ type usageStoreAdapter struct {
 	nodeIP string
 }
 
+func (a *pgStoreAdapter) ListNodes(ctx context.Context) ([]string, error) {
+	return a.s.ListNodes(ctx)
+}
+
+func (a *pgStoreAdapter) ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error) {
+	return a.s.ListAuthByNode(ctx, nodeIP)
+}
+
+// usageStoreAdapter bridges store.PostgresStore to usage.UsageStoreWriter.
 func (a *usageStoreAdapter) InsertUsageRecord(ctx context.Context, r usage.UsageDBRecord) {
 	nodeIP := r.NodeIP
 	if nodeIP == "" {

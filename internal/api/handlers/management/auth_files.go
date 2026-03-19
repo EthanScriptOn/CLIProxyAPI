@@ -244,11 +244,57 @@ func (h *Handler) managementCallbackURL(path string) (string, error) {
 	return fmt.Sprintf("%s://127.0.0.1:%d%s", scheme, h.cfg.Port, path), nil
 }
 
+// GetNodes returns all distinct node IPs that have auth records in the database.
+// Only available when a postgres store is configured.
+func (h *Handler) GetNodes(c *gin.Context) {
+	if h.pgStore == nil {
+		c.JSON(http.StatusOK, gin.H{"nodes": []string{}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	nodes, err := h.pgStore.ListNodes(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if nodes == nil {
+		nodes = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{"nodes": nodes})
+}
+
 func (h *Handler) ListAuthFiles(c *gin.Context) {
 	if h == nil {
 		c.JSON(500, gin.H{"error": "handler not initialized"})
 		return
 	}
+
+	// When pgStore is configured and a node_ip filter is provided, query DB directly.
+	nodeIP := strings.TrimSpace(c.Query("node_ip"))
+	if h.pgStore != nil && nodeIP != "" {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+		auths, err := h.pgStore.ListAuthByNode(ctx, nodeIP)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		files := make([]gin.H, 0, len(auths))
+		for _, auth := range auths {
+			if entry := h.buildAuthFileEntry(auth); entry != nil {
+				files = append(files, entry)
+			}
+		}
+		sort.Slice(files, func(i, j int) bool {
+			nameI, _ := files[i]["name"].(string)
+			nameJ, _ := files[j]["name"].(string)
+			return strings.ToLower(nameI) < strings.ToLower(nameJ)
+		})
+		c.JSON(200, gin.H{"files": files})
+		return
+	}
+
 	if h.authManager == nil {
 		h.listAuthFilesFromDisk(c)
 		return

@@ -490,6 +490,77 @@ func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	return s.deleteAuthRecord(ctx, relID)
 }
 
+// ListNodes returns all distinct node_ip values that have auth records in the database.
+func (s *PostgresStore) ListNodes(ctx context.Context) ([]string, error) {
+	query := fmt.Sprintf("SELECT DISTINCT node_ip FROM %s WHERE node_ip != '' ORDER BY node_ip", s.fullTableName(s.cfg.AuthTable))
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("postgres store: list nodes: %w", err)
+	}
+	defer rows.Close()
+	var nodes []string
+	for rows.Next() {
+		var ip string
+		if err = rows.Scan(&ip); err != nil {
+			return nil, fmt.Errorf("postgres store: scan node ip: %w", err)
+		}
+		nodes = append(nodes, ip)
+	}
+	return nodes, rows.Err()
+}
+
+// ListAuthByNode enumerates all auth records for a specific node_ip.
+func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*cliproxyauth.Auth, error) {
+	query := fmt.Sprintf("SELECT id, content, created_at, updated_at FROM %s WHERE node_ip = $1 ORDER BY id", s.fullTableName(s.cfg.AuthTable))
+	rows, err := s.db.QueryContext(ctx, query, nodeIP)
+	if err != nil {
+		return nil, fmt.Errorf("postgres store: list auth by node: %w", err)
+	}
+	defer rows.Close()
+
+	auths := make([]*cliproxyauth.Auth, 0, 32)
+	for rows.Next() {
+		var (
+			id        string
+			payload   string
+			createdAt time.Time
+			updatedAt time.Time
+		)
+		if err = rows.Scan(&id, &payload, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("postgres store: scan auth row: %w", err)
+		}
+		metadata := make(map[string]any)
+		if err = json.Unmarshal([]byte(payload), &metadata); err != nil {
+			log.WithError(err).Warnf("postgres store: skipping auth %s with invalid json", id)
+			continue
+		}
+		provider := strings.TrimSpace(valueAsString(metadata["type"]))
+		if provider == "" {
+			provider = "unknown"
+		}
+		attr := map[string]string{}
+		if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
+			attr["email"] = email
+		}
+		auth := &cliproxyauth.Auth{
+			ID:        normalizeAuthID(id),
+			Provider:  provider,
+			FileName:  normalizeAuthID(id),
+			Label:     labelFor(metadata),
+			Status:    cliproxyauth.StatusActive,
+			Attributes: attr,
+			Metadata:  metadata,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		}
+		auths = append(auths, auth)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres store: iterate auth rows: %w", err)
+	}
+	return auths, nil
+}
+
 // PersistAuthFiles stores the provided auth file changes in PostgreSQL.
 func (s *PostgresStore) PersistAuthFiles(ctx context.Context, _ string, paths ...string) error {
 	if len(paths) == 0 {
