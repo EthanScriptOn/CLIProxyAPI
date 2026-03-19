@@ -163,7 +163,27 @@ create_instance() {
     done
 
     # config.yaml
-    cat > "${install_dir}/config.yaml" << EOF
+    if [[ -n "${pgstore_dsn}" ]]; then
+        # postgres 模式：api-keys 和 auth-dir 由数据库管理，不写入 config
+        cat > "${install_dir}/config.yaml" << EOF
+host: "0.0.0.0"
+port: ${port}
+
+debug: false
+logging-to-file: true
+logs-max-total-size-mb: 1000
+request-retry: 3
+max-retry-credentials: 2
+max-retry-interval: 30
+
+remote-management:
+  allow-remote: true
+  disable-control-panel: false
+
+usage-statistics-enabled: true
+EOF
+    else
+        cat > "${install_dir}/config.yaml" << EOF
 host: "0.0.0.0"
 port: ${port}
 
@@ -185,6 +205,7 @@ remote-management:
 
 usage-statistics-enabled: true
 EOF
+    fi
 
     # Build environment block for systemd service
     local env_block="Environment=HOME=${HOME}"

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/crypto/bcrypt"
 	"proxycore/api/v6/internal/misc"
 	cliproxyauth "proxycore/api/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -226,10 +227,74 @@ func (s *PostgresStore) Bootstrap(ctx context.Context, exampleConfigPath string)
 	if err := s.syncConfigFromDatabase(ctx, exampleConfigPath); err != nil {
 		return err
 	}
+	if err := s.ensureDefaultSecretKey(ctx); err != nil {
+		log.WithError(err).Warn("failed to ensure default secret key")
+	}
 	if err := s.syncAuthFromDatabase(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+// ensureDefaultSecretKey sets secret-key to "admin" (bcrypt hashed) if it is empty in the database config.
+func (s *PostgresStore) ensureDefaultSecretKey(ctx context.Context) error {
+	query := fmt.Sprintf("SELECT content FROM %s WHERE id = $1", s.fullTableName(s.cfg.ConfigTable))
+	var content string
+	if err := s.db.QueryRowContext(ctx, query, defaultConfigKey).Scan(&content); err != nil {
+		return fmt.Errorf("postgres store: read config for secret key check: %w", err)
+	}
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "secret-key:") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "secret-key:"))
+			val = strings.Trim(val, `"'`)
+			if val != "" {
+				return nil
+			}
+		}
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("postgres store: hash default secret key: %w", err)
+	}
+	updated := updateYAMLScalar(content, []string{"remote-management", "secret-key"}, string(hashed))
+	if err = s.persistConfig(ctx, []byte(updated)); err != nil {
+		return fmt.Errorf("postgres store: persist default secret key: %w", err)
+	}
+	if err = os.WriteFile(s.configPath, []byte(updated), 0o600); err != nil {
+		return fmt.Errorf("postgres store: write updated config to spool: %w", err)
+	}
+	log.Info("postgres store: default management secret key set to 'admin'")
+	return nil
+}
+
+// updateYAMLScalar updates a nested scalar value in a YAML string without a full parse/serialize cycle.
+func updateYAMLScalar(content string, path []string, value string) string {
+	if len(path) == 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	depth := 0
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if depth < len(path)-1 {
+			trimmed := strings.TrimSpace(line)
+			key := path[depth] + ":"
+			if strings.HasPrefix(trimmed, key) {
+				depth++
+			}
+		} else if depth == len(path)-1 {
+			trimmed := strings.TrimSpace(line)
+			key := path[depth] + ":"
+			if strings.HasPrefix(trimmed, key) {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				line = indent + path[depth] + `: "` + value + `"`
+				depth++
+			}
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }
 
 // ConfigPath returns the managed configuration file path inside the spool directory.
