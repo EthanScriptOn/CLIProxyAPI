@@ -257,6 +257,9 @@ func main() {
 			return
 		}
 		examplePath := filepath.Join(wd, "config.example.yaml")
+		if _, errStat := os.Stat(examplePath); errors.Is(errStat, os.ErrNotExist) {
+			examplePath = filepath.Join(wd, "config.yaml")
+		}
 		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 		if errBootstrap := pgStoreInst.Bootstrap(ctx, examplePath); errBootstrap != nil {
 			cancel()
