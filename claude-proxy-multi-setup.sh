@@ -12,7 +12,6 @@ set -euo pipefail
 REPO="EthanScriptOn/CLIProxyAPI"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 API_URL="https://api.github.com/repos/${REPO}/contents/dist"
-CADDYFILE="/etc/caddy/Caddyfile"
 
 DOWNLOAD_DIR="/tmp/proxycore_dl"
 GREEN='\033[0;32m'
@@ -82,40 +81,7 @@ instance_exists() {
 }
 
 # ==============================
-# 1. 安装 Caddy（如未安装）
-# ==============================
-ensure_caddy() {
-    if command -v caddy &>/dev/null; then
-        log_success "Caddy 已安装，跳过"
-        return
-    fi
-    log_step "安装 Caddy..."
-    if command -v apt-get &>/dev/null; then
-        apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-            | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-            | tee /etc/apt/sources.list.d/caddy-stable.list
-        apt-get update
-        apt-get install -y caddy
-    elif command -v dnf &>/dev/null; then
-        dnf install -y 'dnf-command(copr)'
-        dnf copr enable -y @caddy/caddy
-        dnf install -y caddy
-    elif command -v yum &>/dev/null; then
-        yum install -y yum-plugin-copr
-        yum copr enable -y @caddy/caddy
-        yum install -y caddy
-    else
-        log_error "不支持的包管理器，请手动安装 Caddy"
-    fi
-    systemctl enable caddy
-    systemctl start caddy
-    log_success "Caddy 安装完成"
-}
-
-# ==============================
-# 2. 从 GitHub 拉取最新包
+# 1. 从 GitHub 拉取最新包
 # ==============================
 fetch_from_github() {
     log_step "检测系统架构..."
@@ -170,12 +136,14 @@ fetch_from_github() {
 }
 
 # ==============================
-# 3. 创建单个实例
+# 2. 创建单个实例
 # ==============================
 create_instance() {
     local domain=$1
     local port=$2
     local api_key=$3
+    local pgstore_dsn=${4:-""}
+    local node_ip=${5:-""}
 
     local install_dir="/root/proxycore-${domain}"
     local auth_dir="/root/.proxycore-${domain}"
@@ -219,6 +187,17 @@ remote-management:
 usage-statistics-enabled: true
 EOF
 
+    # Build environment block for systemd service
+    local env_block="Environment=HOME=${HOME}"
+    if [[ -n "${pgstore_dsn}" ]]; then
+        env_block="${env_block}
+Environment=PGSTORE_DSN=${pgstore_dsn}"
+    fi
+    if [[ -n "${node_ip}" ]]; then
+        env_block="${env_block}
+Environment=NODE_IP=${node_ip}"
+    fi
+
     # systemd service
     cat > "${systemd_dir}/${service_name}.service" << EOF
 [Unit]
@@ -231,7 +210,7 @@ WorkingDirectory=${install_dir}
 ExecStart=${install_dir}/proxycore -config ${install_dir}/config.yaml
 Restart=always
 RestartSec=10
-Environment=HOME=${HOME}
+${env_block}
 
 [Install]
 WantedBy=default.target
@@ -251,29 +230,6 @@ EOF
 }
 
 # ==============================
-# 4. 追加 Caddy 配置
-# ==============================
-append_caddy_block() {
-    local domain=$1
-    local port=$2
-
-    if grep -q "^${domain}" "${CADDYFILE}" 2>/dev/null; then
-        log_warn "Caddyfile 中已存在 ${domain}，跳过"
-        return
-    fi
-
-    cat >> "${CADDYFILE}" << EOF
-
-${domain} {
-    handle {
-        reverse_proxy 127.0.0.1:${port}
-    }
-}
-EOF
-    log_success "Caddy 配置: ${domain} -> 127.0.0.1:${port}"
-}
-
-# ==============================
 # 主流程
 # ==============================
 main() {
@@ -283,19 +239,32 @@ main() {
     echo ""
 
     check_deps
-    ensure_caddy
-
-    # 初始化 Caddyfile
-    if [[ ! -f "${CADDYFILE}" ]]; then
-        mkdir -p "$(dirname "${CADDYFILE}")"
-        touch "${CADDYFILE}"
-        log_info "已创建空 Caddyfile: ${CADDYFILE}"
-    fi
 
     # 从 GitHub 拉取
     fetch_from_github
 
     echo ""
+
+    # 询问共享数据库 DSN（可选）
+    local pgstore_dsn=""
+    echo "【可选】数据库集中化配置"
+    echo "  所有实例共用同一 PostgreSQL，api_key 和 usage 全局共享，认证文件按机器隔离。"
+    read -rp "PGSTORE_DSN（留空跳过，格式: postgres://user:pass@host:5432/db）: " pgstore_dsn
+    pgstore_dsn="${pgstore_dsn// /}"
+
+    # 检测本机公网 IP（仅在使用数据库时需要）
+    local node_ip=""
+    if [[ -n "${pgstore_dsn}" ]]; then
+        node_ip=$(curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || true)
+        if [[ -z "${node_ip}" ]]; then
+            node_ip=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || true)
+        fi
+        if [[ -n "${node_ip}" ]]; then
+            log_info "检测到本机公网 IP: ${node_ip}"
+        else
+            log_warn "无法自动检测公网 IP，将由程序自动获取内网出口 IP"
+        fi
+    fi
 
     # 询问实例数量
     local count
@@ -327,10 +296,11 @@ main() {
 
         local domain
         while true; do
-            read -rp "域名（如 n${i}.myclaudeproxy.xyz）: " domain
+            read -rp "实例名称（如 node1，用于目录和服务名，默认 node${i}）: " domain
+            domain="${domain:-node${i}}"
             domain="${domain// /}"
-            [[ -n "$domain" ]] || { echo "域名不能为空"; continue; }
-            instance_exists "$domain" && { echo "域名 ${domain} 的实例已存在，请换一个"; continue; }
+            [[ -n "$domain" ]] || { echo "实例名称不能为空"; continue; }
+            instance_exists "$domain" && { echo "实例 ${domain} 已存在，请换一个名称"; continue; }
             break
         done
 
@@ -342,51 +312,36 @@ main() {
         INST_DOMAINS+=("$domain")
         INST_KEYS+=("$api_key")
 
-        create_instance "$domain" "$port" "$api_key"
-        append_caddy_block "$domain" "$port"
+        create_instance "$domain" "$port" "$api_key" "${pgstore_dsn}" "${node_ip}"
     done
 
-    # 重载 Caddy
-    echo ""
-    log_step "重载 Caddy..."
-    if systemctl reload caddy 2>/dev/null; then
-        log_success "Caddy 重载完成"
-    elif caddy reload --config "${CADDYFILE}" 2>/dev/null; then
-        log_success "Caddy 重载完成"
-    else
-        log_warn "Caddy reload 失败，尝试 restart..."
-        systemctl restart caddy && log_success "Caddy 重启完成"
-    fi
-
-    # 开放防火墙
-    if command -v ufw &>/dev/null; then
-        ufw allow 80/tcp  2>/dev/null || true
-        ufw allow 443/tcp 2>/dev/null || true
-    elif command -v firewall-cmd &>/dev/null; then
-        firewall-cmd --permanent --add-service=http  2>/dev/null || true
-        firewall-cmd --permanent --add-service=https 2>/dev/null || true
-        firewall-cmd --reload 2>/dev/null || true
-    fi
+    # 开放防火墙（仅开放服务端口，由 nginx 网关对外）
 
     # 汇总
     echo ""
     echo "========================================"
     echo -e "${GREEN}  部署完成！实例汇总${NC}"
     echo "========================================"
+    if [[ -n "${pgstore_dsn}" ]]; then
+        echo ""
+        echo -e "${CYAN}▶ 数据库集中化已启用${NC}"
+        echo "  所有实例共用同一数据库，api_key 在任意实例管理面板创建后"
+        echo "  约 30 秒内自动同步到所有机器。"
+        echo "  认证文件（OAuth 登录）按机器 IP 隔离，互不影响。"
+    fi
     for i in "${!INST_DOMAINS[@]}"; do
         local d="${INST_DOMAINS[$i]}"
         echo ""
         echo -e "${CYAN}▶ ${d}${NC}"
-        echo "  代理地址 : https://${d}"
+        echo "  实例名称 : ${d}"
         echo "  API Key  : ${INST_KEYS[$i]}"
+        echo "  监听端口 : ${INST_PORTS[$i]}（通过 nginx 网关对外暴露）"
         echo "  工作目录 : /root/proxycore-${d}"
         echo "  Auth目录 : /root/.proxycore-${d}"
         echo "  服务名   : proxycore-${d}.service"
-        echo "  端口     : ${INST_PORTS[$i]}"
         echo ""
         echo "  授权账号 :"
-        echo "    cd /root/proxycore-${d} && ./proxycore --claude-login"
-        echo "  查看状态 :"
+        echo "    cd /root/proxycore-${d} && ./proxycore --claude-login"        echo "  查看状态 :"
         echo "    systemctl status proxycore-${d}.service"
         echo "  查看日志 :"
         echo "    journalctl -u proxycore-${d}.service -f"

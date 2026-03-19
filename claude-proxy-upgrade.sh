@@ -75,7 +75,7 @@ list_instances() {
     if [[ ${#INSTANCE_DOMAINS[@]} -eq 0 ]]; then
         log_error "未找到任何实例（/root/proxycore-* 目录不存在）"
     fi
-    echo "序号  域名                          端口   服务"
+    echo "序号  实例名称                        端口   服务"
     echo "----  ----------------------------  -----  -------------------------"
     for i in "${!INSTANCE_DOMAINS[@]}"; do
         printf "%-4s  %-28s  %-5s  %s\n" \

@@ -3,6 +3,7 @@
 package management
 
 import (
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"net/http"
@@ -50,6 +51,15 @@ type Handler struct {
 	envSecret           string
 	logDir              string
 	postAuthHook        coreauth.PostAuthHook
+	pgStore             DBAPIKeyStore // optional, non-nil when Postgres is configured
+}
+
+// DBAPIKeyStore abstracts postgres api_keys and usage_records operations.
+type DBAPIKeyStore interface {
+	ListAPIKeys(ctx context.Context) ([]APIKeyRecord, error)
+	SaveAPIKey(ctx context.Context, r APIKeyRecord) error
+	DeleteAPIKey(ctx context.Context, key string) error
+	QueryUsageAggregate(ctx context.Context, params UsageAggregateParams) ([]UsageAggregateRow, error)
 }
 
 // NewHandler creates a new management handler instance.

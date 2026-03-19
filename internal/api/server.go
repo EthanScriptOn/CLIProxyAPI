@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"proxycore/api/v6/internal/access"
+	configaccess "proxycore/api/v6/internal/access/config_access"
 	managementHandlers "proxycore/api/v6/internal/api/handlers/management"
 	"proxycore/api/v6/internal/api/middleware"
 	"proxycore/api/v6/internal/api/modules"
@@ -52,6 +53,7 @@ type serverOptionConfig struct {
 	keepAliveTimeout     time.Duration
 	keepAliveOnTimeout   func()
 	postAuthHook         auth.PostAuthHook
+	managementDBStore    managementHandlers.DBAPIKeyStore
 }
 
 // ServerOption customises HTTP server construction.
@@ -114,6 +116,15 @@ func WithRequestLoggerFactory(factory func(*config.Config, string) logging.Reque
 func WithPostAuthHook(hook auth.PostAuthHook) ServerOption {
 	return func(cfg *serverOptionConfig) {
 		cfg.postAuthHook = hook
+	}
+}
+
+// WithManagementDBStore injects a database store into the management API handler.
+// When set, the DB-backed /v0/management/db-api-keys and /v0/management/usage/aggregate
+// endpoints become functional.
+func WithManagementDBStore(store managementHandlers.DBAPIKeyStore) ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.managementDBStore = store
 	}
 }
 
@@ -271,6 +282,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.mgmt.SetLogDirectory(logDir)
 	if optionState.postAuthHook != nil {
 		s.mgmt.SetPostAuthHook(optionState.postAuthHook)
+	}
+	if optionState.managementDBStore != nil {
+		s.mgmt.SetPGStore(optionState.managementDBStore)
 	}
 	s.localPassword = optionState.localPassword
 
@@ -493,6 +507,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/usage", s.mgmt.GetUsageStatistics)
 		mgmt.GET("/usage/export", s.mgmt.ExportUsageStatistics)
 		mgmt.POST("/usage/import", s.mgmt.ImportUsageStatistics)
+		mgmt.GET("/usage/aggregate", s.mgmt.GetUsageAggregate)
 		mgmt.GET("/config", s.mgmt.GetConfig)
 		mgmt.GET("/config.yaml", s.mgmt.GetConfigYAML)
 		mgmt.PUT("/config.yaml", s.mgmt.PutConfigYAML)
@@ -537,6 +552,11 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
 		mgmt.PATCH("/api-keys", s.mgmt.PatchAPIKeys)
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
+
+		// DB-backed api-key management (used when postgres store is configured)
+		mgmt.GET("/db-api-keys", s.mgmt.ListDBAPIKeys)
+		mgmt.POST("/db-api-keys", s.mgmt.CreateDBAPIKey)
+		mgmt.DELETE("/db-api-keys/:key", s.mgmt.DeleteDBAPIKey)
 
 		mgmt.GET("/api-key-quotas", s.mgmt.GetAPIKeyQuotas)
 		mgmt.PUT("/api-key-quotas", s.mgmt.PutAPIKeyQuotas)
@@ -909,6 +929,29 @@ func (s *Server) applyAccessConfig(oldCfg, newCfg *config.Config) {
 	if _, err := access.ApplyAccessProviders(s.accessManager, oldCfg, newCfg); err != nil {
 		return
 	}
+}
+
+// UpdateAPIKeys hot-swaps the set of accepted API keys without restarting the server.
+// It updates both the config-access provider and the in-memory quota map.
+func (s *Server) UpdateAPIKeys(keys []string, quotas map[string]float64) {
+	if s == nil {
+		return
+	}
+	configaccess.UpdateKeys(keys)
+	if s.cfg != nil {
+		s.cfg.SDKConfig.APIKeys = keys
+		if quotas != nil {
+			s.cfg.SDKConfig.APIKeyQuotas = quotas
+		}
+	}
+}
+
+// SetManagementDBStore injects the database store adapter into the management handler.
+func (s *Server) SetManagementDBStore(store managementHandlers.DBAPIKeyStore) {
+	if s == nil || s.mgmt == nil {
+		return
+	}
+	s.mgmt.SetPGStore(store)
 }
 
 // UpdateClients updates the server's client list and configuration.

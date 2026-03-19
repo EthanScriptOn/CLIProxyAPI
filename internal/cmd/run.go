@@ -24,7 +24,8 @@ import (
 //   - cfg: The application configuration
 //   - configPath: The path to the configuration file
 //   - localPassword: Optional password accepted for local management requests
-func StartService(cfg *config.Config, configPath string, localPassword string) {
+//   - serverOpts: Optional additional server configuration options
+func StartService(cfg *config.Config, configPath string, localPassword string, serverOpts ...api.ServerOption) {
 	builder := cliproxy.NewBuilder().
 		WithConfig(cfg).
 		WithConfigPath(configPath).
@@ -37,10 +38,13 @@ func StartService(cfg *config.Config, configPath string, localPassword string) {
 	if localPassword != "" {
 		var keepAliveCancel context.CancelFunc
 		runCtx, keepAliveCancel = context.WithCancel(ctxSignal)
-		builder = builder.WithServerOptions(api.WithKeepAliveEndpoint(10*time.Second, func() {
+		serverOpts = append(serverOpts, api.WithKeepAliveEndpoint(10*time.Second, func() {
 			log.Warn("keep-alive endpoint idle for 10s, shutting down")
 			keepAliveCancel()
 		}))
+	}
+	if len(serverOpts) > 0 {
+		builder = builder.WithServerOptions(serverOpts...)
 	}
 
 	service, err := builder.Build()
@@ -57,11 +61,18 @@ func StartService(cfg *config.Config, configPath string, localPassword string) {
 
 // StartServiceBackground starts the proxy service in a background goroutine
 // and returns a cancel function for shutdown and a done channel.
-func StartServiceBackground(cfg *config.Config, configPath string, localPassword string) (cancel func(), done <-chan struct{}) {
+func StartServiceBackground(cfg *config.Config, configPath string, localPassword string, serverOpts ...api.ServerOption) (cancel func(), done <-chan struct{}) {
 	builder := cliproxy.NewBuilder().
 		WithConfig(cfg).
 		WithConfigPath(configPath).
 		WithLocalManagementPassword(localPassword)
+
+	if localPassword != "" {
+		serverOpts = append(serverOpts, api.WithKeepAliveEndpoint(10*time.Second, func() {}))
+	}
+	if len(serverOpts) > 0 {
+		builder = builder.WithServerOptions(serverOpts...)
+	}
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 	doneCh := make(chan struct{})

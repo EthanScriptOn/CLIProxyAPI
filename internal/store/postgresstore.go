@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,9 +21,11 @@ import (
 )
 
 const (
-	defaultConfigTable = "config_store"
-	defaultAuthTable   = "auth_store"
-	defaultConfigKey   = "config"
+	defaultConfigTable  = "config_store"
+	defaultAuthTable    = "auth_store"
+	defaultConfigKey    = "config"
+	defaultAPIKeysTable = "api_keys"
+	defaultUsageTable   = "usage_records"
 )
 
 // PostgresStoreConfig captures configuration required to initialize a Postgres-backed store.
@@ -32,6 +35,7 @@ type PostgresStoreConfig struct {
 	ConfigTable string
 	AuthTable   string
 	SpoolDir    string
+	NodeIP      string // identifies this machine; used to scope auth records
 }
 
 // PostgresStore persists configuration and authentication metadata using PostgreSQL as backend
@@ -43,6 +47,10 @@ type PostgresStore struct {
 	configPath string
 	authDir    string
 	mu         sync.Mutex
+
+	// usage async writer
+	usageCh   chan UsageRecord
+	usageStop chan struct{}
 }
 
 // NewPostgresStore establishes a connection to PostgreSQL and prepares the local workspace.
@@ -96,13 +104,17 @@ func NewPostgresStore(ctx context.Context, cfg PostgresStoreConfig) (*PostgresSt
 		configPath: filepath.Join(configDir, "config.yaml"),
 		authDir:    authDir,
 	}
+	store.startUsageWorker()
 	return store, nil
 }
 
-// Close releases the underlying database connection.
+// Close releases the underlying database connection and stops background workers.
 func (s *PostgresStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
+	}
+	if s.usageStop != nil {
+		close(s.usageStop)
 	}
 	return s.db.Close()
 }
@@ -132,14 +144,77 @@ func (s *PostgresStore) EnsureSchema(ctx context.Context) error {
 	authTable := s.fullTableName(s.cfg.AuthTable)
 	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
-			id TEXT PRIMARY KEY,
+			id TEXT NOT NULL,
 			content JSONB NOT NULL,
+			node_ip TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (id, node_ip)
 		)
 	`, authTable)); err != nil {
 		return fmt.Errorf("postgres store: create auth table: %w", err)
 	}
+	// Migrate existing tables that may have the old schema (single-column PK without node_ip).
+	// We attempt ALTER TABLE and silently ignore errors (column already exists).
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+		`ALTER TABLE %s ADD COLUMN IF NOT EXISTS node_ip TEXT NOT NULL DEFAULT ''`,
+		authTable,
+	))
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_auth_store_node_ip ON %s (node_ip)`,
+		authTable,
+	))
+
+	// api_keys table
+	apiKeysTable := s.fullTableName(defaultAPIKeysTable)
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			key           TEXT PRIMARY KEY,
+			label         TEXT NOT NULL DEFAULT '',
+			quota_millions FLOAT8 NOT NULL DEFAULT 0,
+			disabled      BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`, apiKeysTable)); err != nil {
+		return fmt.Errorf("postgres store: create api_keys table: %w", err)
+	}
+
+	// usage_records table
+	usageTable := s.fullTableName(defaultUsageTable)
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id               BIGSERIAL PRIMARY KEY,
+			api_key          TEXT NOT NULL DEFAULT '',
+			node_ip          TEXT NOT NULL DEFAULT '',
+			provider         TEXT NOT NULL DEFAULT '',
+			model            TEXT NOT NULL DEFAULT '',
+			auth_id          TEXT NOT NULL DEFAULT '',
+			source           TEXT NOT NULL DEFAULT '',
+			input_tokens     BIGINT NOT NULL DEFAULT 0,
+			output_tokens    BIGINT NOT NULL DEFAULT 0,
+			reasoning_tokens BIGINT NOT NULL DEFAULT 0,
+			cached_tokens    BIGINT NOT NULL DEFAULT 0,
+			total_tokens     BIGINT NOT NULL DEFAULT 0,
+			failed           BOOLEAN NOT NULL DEFAULT FALSE,
+			requested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`, usageTable)); err != nil {
+		return fmt.Errorf("postgres store: create usage_records table: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_usage_records_api_key ON %s (api_key)`,
+		usageTable,
+	))
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_usage_records_requested_at ON %s (requested_at)`,
+		usageTable,
+	))
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_usage_records_node_ip ON %s (node_ip)`,
+		usageTable,
+	))
+
 	return nil
 }
 
@@ -171,6 +246,14 @@ func (s *PostgresStore) AuthDir() string {
 		return ""
 	}
 	return s.authDir
+}
+
+// NodeIP returns the node IP configured for this store instance.
+func (s *PostgresStore) NodeIP() string {
+	if s == nil {
+		return ""
+	}
+	return s.cfg.NodeIP
 }
 
 // WorkDir exposes the root spool directory used for mirroring.
@@ -259,10 +342,10 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 	return path, nil
 }
 
-// List enumerates all auth records stored in PostgreSQL.
+// List enumerates all auth records stored in PostgreSQL for this node.
 func (s *PostgresStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) {
-	query := fmt.Sprintf("SELECT id, content, created_at, updated_at FROM %s ORDER BY id", s.fullTableName(s.cfg.AuthTable))
-	rows, err := s.db.QueryContext(ctx, query)
+	query := fmt.Sprintf("SELECT id, content, created_at, updated_at FROM %s WHERE node_ip = $1 ORDER BY id", s.fullTableName(s.cfg.AuthTable))
+	rows, err := s.db.QueryContext(ctx, query, s.cfg.NodeIP)
 	if err != nil {
 		return nil, fmt.Errorf("postgres store: list auth: %w", err)
 	}
@@ -435,8 +518,8 @@ func (s *PostgresStore) syncConfigFromDatabase(ctx context.Context, exampleConfi
 
 // syncAuthFromDatabase populates the local auth directory from PostgreSQL data.
 func (s *PostgresStore) syncAuthFromDatabase(ctx context.Context) error {
-	query := fmt.Sprintf("SELECT id, content FROM %s", s.fullTableName(s.cfg.AuthTable))
-	rows, err := s.db.QueryContext(ctx, query)
+	query := fmt.Sprintf("SELECT id, content FROM %s WHERE node_ip = $1", s.fullTableName(s.cfg.AuthTable))
+	rows, err := s.db.QueryContext(ctx, query, s.cfg.NodeIP)
 	if err != nil {
 		return fmt.Errorf("postgres store: load auth from database: %w", err)
 	}
@@ -503,20 +586,20 @@ func (s *PostgresStore) upsertAuthRecord(ctx context.Context, relID, path string
 func (s *PostgresStore) persistAuth(ctx context.Context, relID string, data []byte) error {
 	jsonPayload := json.RawMessage(data)
 	query := fmt.Sprintf(`
-		INSERT INTO %s (id, content, created_at, updated_at)
-		VALUES ($1, $2, NOW(), NOW())
-		ON CONFLICT (id)
+		INSERT INTO %s (id, content, node_ip, created_at, updated_at)
+		VALUES ($1, $2, $3, NOW(), NOW())
+		ON CONFLICT (id, node_ip)
 		DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
 	`, s.fullTableName(s.cfg.AuthTable))
-	if _, err := s.db.ExecContext(ctx, query, relID, jsonPayload); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, relID, jsonPayload, s.cfg.NodeIP); err != nil {
 		return fmt.Errorf("postgres store: upsert auth record: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) deleteAuthRecord(ctx context.Context, relID string) error {
-	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", s.fullTableName(s.cfg.AuthTable))
-	if _, err := s.db.ExecContext(ctx, query, relID); err != nil {
+	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1 AND node_ip = $2", s.fullTableName(s.cfg.AuthTable))
+	if _, err := s.db.ExecContext(ctx, query, relID, s.cfg.NodeIP); err != nil {
 		return fmt.Errorf("postgres store: delete auth record: %w", err)
 	}
 	return nil
@@ -662,4 +745,286 @@ func normalizeLineEndings(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	return s
+}
+
+// ─── APIKeyRecord ─────────────────────────────────────────────────────────────
+
+// APIKeyRecord represents a row in the api_keys table.
+type APIKeyRecord struct {
+	Key          string
+	Label        string
+	QuotaMillion float64
+	Disabled     bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// ListAPIKeys returns all non-disabled api_key records from the database.
+func (s *PostgresStore) ListAPIKeys(ctx context.Context) ([]APIKeyRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("postgres store: not initialized")
+	}
+	query := fmt.Sprintf(
+		`SELECT key, label, quota_millions, disabled, created_at, updated_at FROM %s ORDER BY created_at`,
+		s.fullTableName(defaultAPIKeysTable),
+	)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("postgres store: list api keys: %w", err)
+	}
+	defer rows.Close()
+	var records []APIKeyRecord
+	for rows.Next() {
+		var r APIKeyRecord
+		if err = rows.Scan(&r.Key, &r.Label, &r.QuotaMillion, &r.Disabled, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("postgres store: scan api key row: %w", err)
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
+// SaveAPIKey upserts an api_key record.
+func (s *PostgresStore) SaveAPIKey(ctx context.Context, r APIKeyRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	query := fmt.Sprintf(`
+		INSERT INTO %s (key, label, quota_millions, disabled, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		ON CONFLICT (key)
+		DO UPDATE SET label = EXCLUDED.label,
+		              quota_millions = EXCLUDED.quota_millions,
+		              disabled = EXCLUDED.disabled,
+		              updated_at = NOW()
+	`, s.fullTableName(defaultAPIKeysTable))
+	if _, err := s.db.ExecContext(ctx, query, r.Key, r.Label, r.QuotaMillion, r.Disabled); err != nil {
+		return fmt.Errorf("postgres store: save api key: %w", err)
+	}
+	return nil
+}
+
+// DeleteAPIKey removes an api_key record.
+func (s *PostgresStore) DeleteAPIKey(ctx context.Context, key string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	query := fmt.Sprintf("DELETE FROM %s WHERE key = $1", s.fullTableName(defaultAPIKeysTable))
+	if _, err := s.db.ExecContext(ctx, query, key); err != nil {
+		return fmt.Errorf("postgres store: delete api key: %w", err)
+	}
+	return nil
+}
+
+// ─── UsageRecord ──────────────────────────────────────────────────────────────
+
+// UsageRecord represents a row in the usage_records table.
+type UsageRecord struct {
+	APIKey          string
+	NodeIP          string
+	Provider        string
+	Model           string
+	AuthID          string
+	Source          string
+	InputTokens     int64
+	OutputTokens    int64
+	ReasoningTokens int64
+	CachedTokens    int64
+	TotalTokens     int64
+	Failed          bool
+	RequestedAt     time.Time
+}
+
+// InsertUsageRecord enqueues a usage record for asynchronous batch insertion.
+// The method is non-blocking; records are flushed every 5 seconds or when 100 are accumulated.
+func (s *PostgresStore) InsertUsageRecord(_ context.Context, r UsageRecord) {
+	if s == nil || s.usageCh == nil {
+		return
+	}
+	select {
+	case s.usageCh <- r:
+	default:
+		// channel full, drop to avoid blocking the request path
+	}
+}
+
+// startUsageWorker launches a background goroutine that batches usage_records writes.
+func (s *PostgresStore) startUsageWorker() {
+	s.usageCh = make(chan UsageRecord, 500)
+	s.usageStop = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		var batch []UsageRecord
+		flush := func() {
+			if len(batch) == 0 {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := s.flushUsageBatch(ctx, batch); err != nil {
+				log.WithError(err).Warn("postgres store: flush usage batch failed")
+			}
+			batch = batch[:0]
+		}
+		for {
+			select {
+			case r := <-s.usageCh:
+				batch = append(batch, r)
+				if len(batch) >= 100 {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
+			case <-s.usageStop:
+				// drain remaining
+				for {
+					select {
+					case r := <-s.usageCh:
+						batch = append(batch, r)
+					default:
+						flush()
+						return
+					}
+				}
+			}
+		}
+	}()
+}
+
+func (s *PostgresStore) flushUsageBatch(ctx context.Context, batch []UsageRecord) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	table := s.fullTableName(defaultUsageTable)
+	// Build a multi-row INSERT
+	valueArgs := make([]any, 0, len(batch)*14)
+	placeholders := make([]string, 0, len(batch))
+	for i, r := range batch {
+		at := r.RequestedAt
+		if at.IsZero() {
+			at = time.Now()
+		}
+		base := i * 13
+		placeholders = append(placeholders, fmt.Sprintf(
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6,
+			base+7, base+8, base+9, base+10, base+11, base+12, base+13,
+		))
+		valueArgs = append(valueArgs,
+			r.APIKey, r.NodeIP, r.Provider, r.Model, r.AuthID, r.Source,
+			r.InputTokens, r.OutputTokens, r.ReasoningTokens, r.CachedTokens, r.TotalTokens,
+			r.Failed, at,
+		)
+	}
+	query := fmt.Sprintf(
+		`INSERT INTO %s (api_key,node_ip,provider,model,auth_id,source,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,failed,requested_at) VALUES %s`,
+		table, strings.Join(placeholders, ","),
+	)
+	_, err := s.db.ExecContext(ctx, query, valueArgs...)
+	return err
+}
+
+// QueryUsageAggregate executes a configurable aggregate query over usage_records.
+func (s *PostgresStore) QueryUsageAggregate(ctx context.Context, params UsageAggregateParams) ([]UsageAggregateRow, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("postgres store: not initialized")
+	}
+	groupCol := "api_key"
+	switch params.GroupBy {
+	case "node_ip":
+		groupCol = "node_ip"
+	case "model":
+		groupCol = "model"
+	case "day":
+		groupCol = "DATE_TRUNC('day', requested_at)"
+	}
+
+	where := []string{"1=1"}
+	args := []any{}
+	argIdx := 1
+	if params.APIKey != "" {
+		where = append(where, fmt.Sprintf("api_key = $%d", argIdx))
+		args = append(args, params.APIKey)
+		argIdx++
+	}
+	if params.NodeIP != "" {
+		where = append(where, fmt.Sprintf("node_ip = $%d", argIdx))
+		args = append(args, params.NodeIP)
+		argIdx++
+	}
+	if !params.From.IsZero() {
+		where = append(where, fmt.Sprintf("requested_at >= $%d", argIdx))
+		args = append(args, params.From)
+		argIdx++
+	}
+	if !params.To.IsZero() {
+		where = append(where, fmt.Sprintf("requested_at <= $%d", argIdx))
+		args = append(args, params.To)
+		argIdx++
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s AS group_key,
+		       COUNT(*) AS requests,
+		       SUM(input_tokens) AS input_tokens,
+		       SUM(output_tokens) AS output_tokens,
+		       SUM(total_tokens) AS total_tokens,
+		       SUM(CASE WHEN failed THEN 1 ELSE 0 END) AS failed_count
+		FROM %s
+		WHERE %s
+		GROUP BY %s
+		ORDER BY requests DESC
+	`, groupCol, s.fullTableName(defaultUsageTable), strings.Join(where, " AND "), groupCol)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres store: usage aggregate query: %w", err)
+	}
+	defer rows.Close()
+	var result []UsageAggregateRow
+	for rows.Next() {
+		var row UsageAggregateRow
+		if err = rows.Scan(&row.GroupKey, &row.Requests, &row.InputTokens, &row.OutputTokens, &row.TotalTokens, &row.FailedCount); err != nil {
+			return nil, fmt.Errorf("postgres store: scan aggregate row: %w", err)
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+// UsageAggregateParams specifies filters for QueryUsageAggregate.
+type UsageAggregateParams struct {
+	APIKey  string
+	NodeIP  string
+	From    time.Time
+	To      time.Time
+	GroupBy string // api_key | node_ip | model | day
+}
+
+// UsageAggregateRow is one result row from QueryUsageAggregate.
+type UsageAggregateRow struct {
+	GroupKey     string `json:"group_key"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
+	FailedCount  int64  `json:"failed_count"`
+}
+
+// ─── DetectLocalIP ────────────────────────────────────────────────────────────
+
+// DetectLocalIP returns the local outbound IP address by connecting (without sending data)
+// to a well-known external address. Returns empty string on failure.
+func DetectLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return ""
+	}
+	return localAddr.IP.String()
 }

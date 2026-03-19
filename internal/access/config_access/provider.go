@@ -4,32 +4,68 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 
 	sdkaccess "proxycore/api/v6/sdk/access"
 	sdkconfig "proxycore/api/v6/sdk/config"
+)
+
+var (
+	globalMu       sync.Mutex
+	globalProvider *provider
 )
 
 // Register ensures the config-access provider is available to the access manager.
 func Register(cfg *sdkconfig.SDKConfig) {
 	if cfg == nil {
 		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
+		globalMu.Lock()
+		globalProvider = nil
+		globalMu.Unlock()
 		return
 	}
 
 	keys := normalizeKeys(cfg.APIKeys)
 	if len(keys) == 0 {
 		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
+		globalMu.Lock()
+		globalProvider = nil
+		globalMu.Unlock()
 		return
 	}
 
-	sdkaccess.RegisterProvider(
-		sdkaccess.AccessProviderTypeConfigAPIKey,
-		newProvider(sdkaccess.DefaultAccessProviderName, keys),
-	)
+	p := newProvider(sdkaccess.DefaultAccessProviderName, keys)
+	sdkaccess.RegisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey, p)
+	globalMu.Lock()
+	globalProvider = p
+	globalMu.Unlock()
+}
+
+// UpdateKeys hot-swaps the key set of the currently registered provider.
+// If no provider is registered yet, one is created and registered.
+func UpdateKeys(keys []string) {
+	normalized := normalizeKeys(keys)
+
+	globalMu.Lock()
+	p := globalProvider
+	if p == nil && len(normalized) > 0 {
+		p = newProvider(sdkaccess.DefaultAccessProviderName, nil)
+		sdkaccess.RegisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey, p)
+		globalProvider = p
+	}
+	globalMu.Unlock()
+
+	if p != nil {
+		p.UpdateKeys(normalized)
+	}
+	if len(normalized) == 0 {
+		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
+	}
 }
 
 type provider struct {
 	name string
+	mu   sync.RWMutex
 	keys map[string]struct{}
 }
 
@@ -45,6 +81,21 @@ func newProvider(name string, keys []string) *provider {
 	return &provider{name: providerName, keys: keySet}
 }
 
+// UpdateKeys replaces the current key set atomically.
+func (p *provider) UpdateKeys(keys []string) {
+	if p == nil {
+		return
+	}
+	normalized := normalizeKeys(keys)
+	keySet := make(map[string]struct{}, len(normalized))
+	for _, k := range normalized {
+		keySet[k] = struct{}{}
+	}
+	p.mu.Lock()
+	p.keys = keySet
+	p.mu.Unlock()
+}
+
 func (p *provider) Identifier() string {
 	if p == nil || p.name == "" {
 		return sdkaccess.DefaultAccessProviderName
@@ -56,7 +107,10 @@ func (p *provider) Authenticate(_ context.Context, r *http.Request) (*sdkaccess.
 	if p == nil {
 		return nil, sdkaccess.NewNotHandledError()
 	}
-	if len(p.keys) == 0 {
+	p.mu.RLock()
+	keyCount := len(p.keys)
+	p.mu.RUnlock()
+	if keyCount == 0 {
 		return nil, sdkaccess.NewNotHandledError()
 	}
 	authHeader := r.Header.Get("Authorization")
@@ -85,6 +139,8 @@ func (p *provider) Authenticate(_ context.Context, r *http.Request) (*sdkaccess.
 		{queryAuthToken, "query-auth-token"},
 	}
 
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	for _, candidate := range candidates {
 		if candidate.value == "" {
 			continue

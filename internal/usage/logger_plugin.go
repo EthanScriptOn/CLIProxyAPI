@@ -20,6 +20,41 @@ import (
 
 var statisticsEnabled atomic.Bool
 
+// UsageStoreWriter abstracts the database writer for usage records.
+type UsageStoreWriter interface {
+	InsertUsageRecord(ctx context.Context, r UsageDBRecord)
+}
+
+// UsageDBRecord mirrors store.UsageRecord but lives here to avoid import cycles.
+type UsageDBRecord struct {
+	APIKey          string
+	NodeIP          string
+	Provider        string
+	Model           string
+	AuthID          string
+	Source          string
+	InputTokens     int64
+	OutputTokens    int64
+	ReasoningTokens int64
+	CachedTokens    int64
+	TotalTokens     int64
+	Failed          bool
+	RequestedAt     time.Time
+}
+
+var (
+	globalUsageStoreMu sync.RWMutex
+	globalUsageStore   UsageStoreWriter
+)
+
+// SetUsageStore injects the database store used for persistent usage logging.
+// Pass nil to disable database writes.
+func SetUsageStore(s UsageStoreWriter) {
+	globalUsageStoreMu.Lock()
+	globalUsageStore = s
+	globalUsageStoreMu.Unlock()
+}
+
 func init() {
 	statisticsEnabled.Store(true)
 	coreusage.RegisterPlugin(NewLoggerPlugin())
@@ -51,6 +86,33 @@ func (p *LoggerPlugin) HandleUsage(ctx context.Context, record coreusage.Record)
 		return
 	}
 	p.stats.Record(ctx, record)
+
+	// Async DB write — non-blocking.
+	globalUsageStoreMu.RLock()
+	s := globalUsageStore
+	globalUsageStoreMu.RUnlock()
+	if s != nil {
+		detail := normaliseDetail(record.Detail)
+		at := record.RequestedAt
+		if at.IsZero() {
+			at = time.Now()
+		}
+		dbRec := UsageDBRecord{
+			APIKey:          record.APIKey,
+			Provider:        record.Provider,
+			Model:           record.Model,
+			AuthID:          record.AuthID,
+			Source:          record.Source,
+			InputTokens:     detail.InputTokens,
+			OutputTokens:    detail.OutputTokens,
+			ReasoningTokens: detail.ReasoningTokens,
+			CachedTokens:    detail.CachedTokens,
+			TotalTokens:     detail.TotalTokens,
+			Failed:          record.Failed,
+			RequestedAt:     at,
+		}
+		s.InsertUsageRecord(ctx, dbRec)
+	}
 }
 
 // SetStatisticsEnabled toggles whether in-memory statistics are recorded.

@@ -18,6 +18,7 @@ import (
 
 	"github.com/joho/godotenv"
 	configaccess "proxycore/api/v6/internal/access/config_access"
+	internalapi "proxycore/api/v6/internal/api"
 	"proxycore/api/v6/internal/buildinfo"
 	"proxycore/api/v6/internal/cmd"
 	"proxycore/api/v6/internal/config"
@@ -238,11 +239,17 @@ func main() {
 			pgStoreLocalPath = wd
 		}
 		pgStoreLocalPath = filepath.Join(pgStoreLocalPath, "pgstore")
+		// Determine node IP: prefer NODE_IP env var, then auto-detect.
+		nodeIP := os.Getenv("NODE_IP")
+		if nodeIP == "" {
+			nodeIP = store.DetectLocalIP()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		pgStoreInst, err = store.NewPostgresStore(ctx, store.PostgresStoreConfig{
 			DSN:      pgStoreDSN,
 			Schema:   pgStoreSchema,
 			SpoolDir: pgStoreLocalPath,
+			NodeIP:   nodeIP,
 		})
 		cancel()
 		if err != nil {
@@ -456,6 +463,17 @@ func main() {
 	// Register built-in access providers before constructing services.
 	configaccess.Register(&cfg.SDKConfig)
 
+	// When postgres store is available, load api_keys from DB and start hot-reload polling.
+	var pgAdapter *pgStoreAdapter
+	if usePostgresStore && pgStoreInst != nil {
+		pgAdapter = &pgStoreAdapter{s: pgStoreInst}
+		loadAPIKeysFromDB(cfg, pgStoreInst)
+		configaccess.Register(&cfg.SDKConfig)
+		go pollAPIKeys(pgStoreInst, cfg)
+		// Inject postgres usage writer.
+		usage.SetUsageStore(&usageStoreAdapter{s: pgStoreInst, nodeIP: pgStoreInst.NodeIP()})
+	}
+
 	// Handle different command modes based on the provided flags.
 
 	if vertexImport != "" {
@@ -524,7 +542,11 @@ func main() {
 					password = localMgmtPassword
 				}
 
-				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password)
+				var tuiServerOpts []internalapi.ServerOption
+				if pgAdapter != nil {
+					tuiServerOpts = append(tuiServerOpts, internalapi.WithManagementDBStore(pgAdapter))
+				}
+				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password, tuiServerOpts...)
 
 				client := tui.NewClient(cfg.Port, password)
 				ready := false
@@ -567,7 +589,11 @@ func main() {
 		} else {
 			// Start the main proxy service
 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
-			cmd.StartService(cfg, configFilePath, password)
+			var srvOpts []internalapi.ServerOption
+			if pgAdapter != nil {
+				srvOpts = append(srvOpts, internalapi.WithManagementDBStore(pgAdapter))
+			}
+			cmd.StartService(cfg, configFilePath, password, srvOpts...)
 		}
 	}
 }
