@@ -226,6 +226,13 @@ EOF
     else
         log_warn "实例 [${domain}] 服务可能未启动，请检查: systemctl status ${service_name}.service"
     fi
+
+    # postgres 模式下 static 目录路径不同，需要额外复制 management.html
+    if [[ -n "${pgstore_dsn}" ]] && [[ -f "${install_dir}/static/management.html" ]]; then
+        mkdir -p "${install_dir}/pgstore/config/static"
+        cp "${install_dir}/static/management.html" "${install_dir}/pgstore/config/static/management.html"
+        log_success "management.html 已复制到 pgstore/config/static/"
+    fi
 }
 
 # ==============================
