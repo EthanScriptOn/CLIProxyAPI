@@ -27,6 +27,7 @@ const (
 	defaultConfigKey    = "config"
 	defaultAPIKeysTable = "api_keys"
 	defaultUsageTable   = "usage_records"
+	defaultNodesTable   = "nodes"
 )
 
 // PostgresStoreConfig captures configuration required to initialize a Postgres-backed store.
@@ -215,6 +216,26 @@ func (s *PostgresStore) EnsureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_node_ip ON %s (node_ip)`,
 		usageTable,
 	))
+
+	// nodes registry table — each node upserts itself on startup
+	nodesTable := s.fullTableName(defaultNodesTable)
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			node_ip    TEXT PRIMARY KEY,
+			registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`, nodesTable)); err != nil {
+		return fmt.Errorf("postgres store: create nodes table: %w", err)
+	}
+	// Register this node
+	if s.cfg.NodeIP != "" {
+		_, _ = s.db.ExecContext(ctx, fmt.Sprintf(`
+			INSERT INTO %s (node_ip, registered_at, last_seen_at)
+			VALUES ($1, NOW(), NOW())
+			ON CONFLICT (node_ip) DO UPDATE SET last_seen_at = NOW()
+		`, nodesTable), s.cfg.NodeIP)
+	}
 
 	return nil
 }
@@ -490,9 +511,9 @@ func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	return s.deleteAuthRecord(ctx, relID)
 }
 
-// ListNodes returns all distinct node_ip values that have auth records in the database.
+// ListNodes returns all registered node IPs from the nodes registry table.
 func (s *PostgresStore) ListNodes(ctx context.Context) ([]string, error) {
-	query := fmt.Sprintf("SELECT DISTINCT node_ip FROM %s WHERE node_ip != '' ORDER BY node_ip", s.fullTableName(s.cfg.AuthTable))
+	query := fmt.Sprintf("SELECT node_ip FROM %s ORDER BY node_ip", s.fullTableName(defaultNodesTable))
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("postgres store: list nodes: %w", err)
