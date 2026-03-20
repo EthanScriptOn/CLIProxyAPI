@@ -138,6 +138,17 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		}
 		h.cfg = &cfg
 		h.refreshAccessKeys()
+		// Sync api-keys from yaml into the api_keys table
+		if h.pgStore != nil && len(cfg.APIKeys) > 0 {
+			for _, key := range cfg.APIKeys {
+				key = strings.TrimSpace(key)
+				if key == "" {
+					continue
+				}
+				_ = h.pgStore.SaveAPIKey(c.Request.Context(), APIKeyRecord{Key: key})
+			}
+			h.syncDBKeysToMemory(c.Request.Context())
+		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
 		return
 	}
