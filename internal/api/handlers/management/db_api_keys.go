@@ -7,7 +7,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	configaccess "proxycore/api/v6/internal/access/config_access"
+	log "github.com/sirupsen/logrus"
 )
+
+const dbKeySyncInterval = 30 * time.Second
 
 // APIKeyRecord mirrors store.APIKeyRecord but lives in this package to avoid import cycles.
 type APIKeyRecord struct {
@@ -44,6 +48,52 @@ func (h *Handler) SetPGStore(s DBAPIKeyStore) {
 		return
 	}
 	h.pgStore = s
+	if s != nil {
+		go h.startDBKeySync()
+	}
+}
+
+// startDBKeySync periodically reloads DB keys into the in-memory access provider.
+func (h *Handler) startDBKeySync() {
+	ticker := time.NewTicker(dbKeySyncInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if h.pgStore == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		records, err := h.pgStore.ListAPIKeys(ctx)
+		cancel()
+		if err != nil {
+			log.WithError(err).Debug("db key sync: failed to list api keys")
+			continue
+		}
+		keys := make([]string, 0, len(records))
+		for _, r := range records {
+			if !r.Disabled {
+				keys = append(keys, r.Key)
+			}
+		}
+		configaccess.UpdateKeys(keys)
+	}
+}
+
+// syncDBKeysToMemory reloads all non-disabled keys from the database into the in-memory access provider.
+func (h *Handler) syncDBKeysToMemory(ctx context.Context) {
+	if h.pgStore == nil {
+		return
+	}
+	records, err := h.pgStore.ListAPIKeys(ctx)
+	if err != nil {
+		return
+	}
+	keys := make([]string, 0, len(records))
+	for _, r := range records {
+		if !r.Disabled {
+			keys = append(keys, r.Key)
+		}
+	}
+	configaccess.UpdateKeys(keys)
 }
 
 // ListDBAPIKeys returns all api_key records from the database.
@@ -88,6 +138,7 @@ func (h *Handler) CreateDBAPIKey(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.syncDBKeysToMemory(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "key": r.Key})
 }
 
@@ -109,6 +160,7 @@ func (h *Handler) DeleteDBAPIKey(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.syncDBKeysToMemory(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 

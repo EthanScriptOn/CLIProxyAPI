@@ -107,8 +107,18 @@ func (h *Handler) deleteFromStringList(c *gin.Context, target *[]string, after f
 }
 
 // api-keys
-func (h *Handler) GetAPIKeys(c *gin.Context) { c.JSON(200, gin.H{"api-keys": h.cfg.APIKeys}) }
+func (h *Handler) GetAPIKeys(c *gin.Context) {
+	if h.pgStore != nil {
+		h.ListDBAPIKeys(c)
+		return
+	}
+	c.JSON(200, gin.H{"api-keys": h.cfg.APIKeys})
+}
 func (h *Handler) PutAPIKeys(c *gin.Context) {
+	if h.pgStore != nil {
+		h.CreateDBAPIKey(c)
+		return
+	}
 	h.putStringList(c, func(v []string) {
 		h.cfg.APIKeys = append([]string(nil), v...)
 	}, func() { h.refreshAccessKeys() })
@@ -117,6 +127,10 @@ func (h *Handler) PatchAPIKeys(c *gin.Context) {
 	h.patchStringList(c, &h.cfg.APIKeys, func() { h.refreshAccessKeys() })
 }
 func (h *Handler) DeleteAPIKeys(c *gin.Context) {
+	if h.pgStore != nil {
+		h.DeleteDBAPIKey(c)
+		return
+	}
 	h.deleteFromStringList(c, &h.cfg.APIKeys, func() { h.refreshAccessKeys() })
 }
 
@@ -129,6 +143,19 @@ func (h *Handler) refreshAccessKeys() {
 
 // api-key-quotas
 func (h *Handler) GetAPIKeyQuotas(c *gin.Context) {
+	if h.pgStore != nil {
+		records, err := h.pgStore.ListAPIKeys(c.Request.Context())
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		quotas := make(map[string]float64, len(records))
+		for _, r := range records {
+			quotas[r.Key] = r.QuotaMillion
+		}
+		c.JSON(200, gin.H{"api-key-quotas": quotas})
+		return
+	}
 	quotas := h.cfg.APIKeyQuotas
 	if quotas == nil {
 		quotas = map[string]float64{}

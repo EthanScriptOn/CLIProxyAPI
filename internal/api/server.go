@@ -307,6 +307,16 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	if optionState.managementDBStore != nil {
 		s.mgmt.SetPGStore(optionState.managementDBStore)
+		// Load DB api keys into the in-memory access provider at startup.
+		if records, err := optionState.managementDBStore.ListAPIKeys(context.Background()); err == nil {
+			keys := make([]string, 0, len(records))
+			for _, r := range records {
+				if !r.Disabled {
+					keys = append(keys, r.Key)
+				}
+			}
+			configaccess.UpdateKeys(keys)
+		}
 	}
 	if optionState.configPersister != nil {
 		s.mgmt.SetConfigPersister(optionState.configPersister)
