@@ -131,7 +131,7 @@ func (h *Handler) APICall(c *gin.Context) {
 	}
 
 	authIndex := firstNonEmptyString(body.AuthIndexSnake, body.AuthIndexCamel, body.AuthIndexPascal)
-	auth := h.authByIndex(authIndex)
+	auth := h.authByIndex(c.Request.Context(), authIndex)
 
 	reqHeaders := body.Header
 	if reqHeaders == nil {
@@ -613,9 +613,28 @@ func tokenValueFromMetadata(metadata map[string]any) string {
 	return ""
 }
 
-func (h *Handler) authByIndex(authIndex string) *coreauth.Auth {
+func (h *Handler) authByIndex(ctx context.Context, authIndex string) *coreauth.Auth {
 	authIndex = strings.TrimSpace(authIndex)
-	if authIndex == "" || h == nil || h.authManager == nil {
+	if authIndex == "" || h == nil {
+		return nil
+	}
+	// PG mode: query DB as source of truth.
+	if h.pgStore != nil {
+		auths, err := h.pgStore.ListAllAuth(ctx)
+		if err == nil {
+			for _, auth := range auths {
+				if auth == nil {
+					continue
+				}
+				auth.EnsureIndex()
+				if auth.Index == authIndex {
+					return auth
+				}
+			}
+		}
+		return nil
+	}
+	if h.authManager == nil {
 		return nil
 	}
 	auths := h.authManager.List()
