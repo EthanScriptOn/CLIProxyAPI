@@ -120,7 +120,29 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_yaml", "message": err.Error()})
 		return
 	}
-	// Validate config using LoadConfigOptional with optional=false to enforce parsing
+
+	// Validate by parsing the YAML content directly (works in both file and PG mode)
+	if _, err = config.ParseConfigContent(string(body), false); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// PG mode: persist to database
+	if h.configPersister != nil {
+		if err = h.configPersister.SaveConfigContent(c.Request.Context(), string(body)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "write_failed", "message": err.Error()})
+			return
+		}
+		h.cfg = &cfg
+		h.refreshAccessKeys()
+		c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
+		return
+	}
+
+	// File mode: validate via temp file then write
 	tmpDir := filepath.Dir(h.configFilePath)
 	tmpFile, err := os.CreateTemp(tmpDir, "config-validate-*.yaml")
 	if err != nil {
@@ -142,13 +164,6 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 	defer func() {
 		_ = os.Remove(tempFile)
 	}()
-	_, err = config.LoadConfigOptional(tempFile, false)
-	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
-		return
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	if WriteConfig(h.configFilePath, body) != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "write_failed", "message": "failed to write config"})
 		return
@@ -164,22 +179,32 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
 }
 
-// GetConfigYAML returns the raw config.yaml file bytes without re-encoding.
-// It preserves comments and original formatting/styles.
+// GetConfigYAML returns the raw config.yaml bytes without re-encoding.
+// In PG mode it reads from the database; in file mode it reads from disk.
 func (h *Handler) GetConfigYAML(c *gin.Context) {
-	data, err := os.ReadFile(h.configFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "config file not found"})
+	var data []byte
+	if h.configPersister != nil {
+		content, err := h.configPersister.GetConfigContent(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": err.Error()})
-		return
+		data = []byte(content)
+	} else {
+		var err error
+		data, err = os.ReadFile(h.configFilePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "config file not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": err.Error()})
+			return
+		}
 	}
 	c.Header("Content-Type", "application/yaml; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	// Write raw bytes as-is
 	_, _ = c.Writer.Write(data)
 }
 
