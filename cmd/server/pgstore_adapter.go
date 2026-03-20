@@ -50,6 +50,7 @@ func (a *pgStoreAdapter) QueryUsageAggregate(ctx context.Context, params managem
 	raw, err := a.s.QueryUsageAggregate(ctx, store.UsageAggregateParams{
 		APIKey:  params.APIKey,
 		NodeIP:  params.NodeIP,
+		AuthID:  params.AuthID,
 		From:    params.From,
 		To:      params.To,
 		GroupBy: params.GroupBy,

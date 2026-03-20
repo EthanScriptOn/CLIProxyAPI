@@ -116,7 +116,30 @@ func (h *Handler) GetAPIKeys(c *gin.Context) {
 }
 func (h *Handler) PutAPIKeys(c *gin.Context) {
 	if h.pgStore != nil {
-		h.CreateDBAPIKey(c)
+		// Frontend sends a string array; upsert each key into the DB.
+		data, err := c.GetRawData()
+		if err != nil {
+			c.JSON(400, gin.H{"error": "failed to read body"})
+			return
+		}
+		var keys []string
+		if err = json.Unmarshal(data, &keys); err != nil {
+			// Maybe a single object {"key":"..."}
+			h.CreateDBAPIKey(c)
+			return
+		}
+		for _, k := range keys {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			if err = h.pgStore.SaveAPIKey(c.Request.Context(), APIKeyRecord{Key: k}); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		h.syncDBKeysToMemory(c.Request.Context())
+		c.JSON(200, gin.H{"ok": true})
 		return
 	}
 	h.putStringList(c, func(v []string) {
@@ -128,7 +151,38 @@ func (h *Handler) PatchAPIKeys(c *gin.Context) {
 }
 func (h *Handler) DeleteAPIKeys(c *gin.Context) {
 	if h.pgStore != nil {
-		h.DeleteDBAPIKey(c)
+		// Frontend may send ?index=N (legacy) or ?key=xxx or :key param.
+		key := strings.TrimSpace(c.Param("key"))
+		if key == "" {
+			key = strings.TrimSpace(c.Query("key"))
+		}
+		if key == "" {
+			// Legacy index-based delete: look up key from DB list by index.
+			indexStr := strings.TrimSpace(c.Query("index"))
+			if indexStr != "" {
+				records, err := h.pgStore.ListAPIKeys(c.Request.Context())
+				if err != nil {
+					c.JSON(500, gin.H{"error": err.Error()})
+					return
+				}
+				idx := 0
+				if _, err = fmt.Sscanf(indexStr, "%d", &idx); err != nil || idx < 0 || idx >= len(records) {
+					c.JSON(400, gin.H{"error": "invalid index"})
+					return
+				}
+				key = records[idx].Key
+			}
+		}
+		if key == "" {
+			c.JSON(400, gin.H{"error": "key is required"})
+			return
+		}
+		if err := h.pgStore.DeleteAPIKey(c.Request.Context(), key); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		h.syncDBKeysToMemory(c.Request.Context())
+		c.JSON(200, gin.H{"status": "ok"})
 		return
 	}
 	h.deleteFromStringList(c, &h.cfg.APIKeys, func() { h.refreshAccessKeys() })

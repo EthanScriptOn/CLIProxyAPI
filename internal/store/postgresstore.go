@@ -1060,6 +1060,11 @@ func (s *PostgresStore) QueryUsageAggregate(ctx context.Context, params UsageAgg
 		args = append(args, params.NodeIP)
 		argIdx++
 	}
+	if params.AuthID != "" {
+		where = append(where, fmt.Sprintf("auth_id = $%d", argIdx))
+		args = append(args, params.AuthID)
+		argIdx++
+	}
 	if !params.From.IsZero() {
 		where = append(where, fmt.Sprintf("requested_at >= $%d", argIdx))
 		args = append(args, params.From)
@@ -1104,6 +1109,7 @@ func (s *PostgresStore) QueryUsageAggregate(ctx context.Context, params UsageAgg
 type UsageAggregateParams struct {
 	APIKey  string
 	NodeIP  string
+	AuthID  string
 	From    time.Time
 	To      time.Time
 	GroupBy string // api_key | node_ip | model | day

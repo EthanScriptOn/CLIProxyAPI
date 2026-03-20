@@ -27,6 +27,7 @@ type APIKeyRecord struct {
 type UsageAggregateParams struct {
 	APIKey  string
 	NodeIP  string
+	AuthID  string
 	From    time.Time
 	To      time.Time
 	GroupBy string
@@ -173,6 +174,7 @@ func (h *Handler) GetUsageAggregate(c *gin.Context) {
 	params := UsageAggregateParams{
 		APIKey:  strings.TrimSpace(c.Query("api_key")),
 		NodeIP:  strings.TrimSpace(c.Query("node_ip")),
+		AuthID:  strings.TrimSpace(c.Query("auth_id")),
 		GroupBy: strings.TrimSpace(c.Query("group_by")),
 	}
 	if fromStr := c.Query("from"); fromStr != "" {
