@@ -270,9 +270,13 @@ func main() {
 		configFilePath = ""
 		var cfgContent string
 		cfgContent, err = pgStoreInst.GetConfigContent(context.Background())
-		if err == nil {
+		if err != nil {
+			log.Errorf("failed to read config from postgres store: %v", err)
+		} else {
 			cfg, err = config.ParseConfigContent(cfgContent, isCloudDeploy)
-			if err == nil {
+			if err != nil {
+				log.Errorf("failed to parse config from postgres store: %v", err)
+			} else {
 				log.Infof("postgres-backed token store enabled (DB-only mode)")
 			}
 		}
@@ -336,7 +340,9 @@ func main() {
 		cancel()
 		configFilePath = objectStoreInst.ConfigPath()
 		cfg, err = config.LoadConfigOptional(configFilePath, isCloudDeploy)
-		if err == nil {
+		if err != nil {
+			log.Errorf("failed to load config from object store: %v", err)
+		} else {
 			if cfg == nil {
 				cfg = &config.Config{}
 			}

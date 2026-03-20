@@ -6,6 +6,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -49,12 +51,14 @@ func StartService(cfg *config.Config, configPath string, localPassword string, s
 
 	service, err := builder.Build()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build proxy service: %v\n", err)
 		log.Errorf("failed to build proxy service: %v", err)
 		return
 	}
 
 	err = service.Run(runCtx)
 	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "proxy service exited with error: %v\n", err)
 		log.Errorf("proxy service exited with error: %v", err)
 	}
 }

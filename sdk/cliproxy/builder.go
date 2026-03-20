@@ -168,9 +168,6 @@ func (b *Builder) Build() (*Service, error) {
 	if b.cfg == nil {
 		return nil, fmt.Errorf("cliproxy: configuration is required")
 	}
-	if b.configPath == "" {
-		return nil, fmt.Errorf("cliproxy: configuration path is required")
-	}
 
 	tokenProvider := b.tokenProvider
 	if tokenProvider == nil {
