@@ -337,6 +337,19 @@ func (h *Handler) persist(c *gin.Context) bool {
 	return true
 }
 
+// loadCfgFromDB fetches and parses config from DB when in PG mode.
+// Returns nil, nil if configPersister is not set (file mode).
+func (h *Handler) loadCfgFromDB(ctx context.Context) (*config.Config, error) {
+	if h.configPersister == nil {
+		return nil, nil
+	}
+	content, err := h.configPersister.GetConfigContent(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return config.ParseConfigContent(content, true)
+}
+
 // Helper methods for simple types
 func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 	var body struct {

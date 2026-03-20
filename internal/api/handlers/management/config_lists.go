@@ -728,6 +728,17 @@ func (h *Handler) DeleteVertexCompatKey(c *gin.Context) {
 
 // oauth-excluded-models: map[string][]string
 func (h *Handler) GetOAuthExcludedModels(c *gin.Context) {
+	if h.configPersister != nil {
+		cfg, err := h.loadCfgFromDB(c.Request.Context())
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		if cfg != nil {
+			c.JSON(200, gin.H{"oauth-excluded-models": config.NormalizeOAuthExcludedModels(cfg.OAuthExcludedModels)})
+			return
+		}
+	}
 	c.JSON(200, gin.H{"oauth-excluded-models": config.NormalizeOAuthExcludedModels(h.cfg.OAuthExcludedModels)})
 }
 
@@ -813,6 +824,17 @@ func (h *Handler) DeleteOAuthExcludedModels(c *gin.Context) {
 
 // oauth-model-alias: map[string][]OAuthModelAlias
 func (h *Handler) GetOAuthModelAlias(c *gin.Context) {
+	if h.configPersister != nil {
+		cfg, err := h.loadCfgFromDB(c.Request.Context())
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		if cfg != nil {
+			c.JSON(200, gin.H{"oauth-model-alias": sanitizedOAuthModelAlias(cfg.OAuthModelAlias)})
+			return
+		}
+	}
 	c.JSON(200, gin.H{"oauth-model-alias": sanitizedOAuthModelAlias(h.cfg.OAuthModelAlias)})
 }
 

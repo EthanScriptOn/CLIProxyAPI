@@ -536,20 +536,20 @@ func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*c
 		if provider == "" {
 			provider = "unknown"
 		}
-		attr := map[string]string{}
+		attr := map[string]string{"runtime_only": "true"}
 		if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 			attr["email"] = email
 		}
 		auth := &cliproxyauth.Auth{
-			ID:        normalizeAuthID(id),
-			Provider:  provider,
-			FileName:  normalizeAuthID(id),
-			Label:     labelFor(metadata),
-			Status:    cliproxyauth.StatusActive,
+			ID:         normalizeAuthID(id),
+			Provider:   provider,
+			FileName:   normalizeAuthID(id),
+			Label:      labelFor(metadata),
+			Status:     cliproxyauth.StatusActive,
 			Attributes: attr,
-			Metadata:  metadata,
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
+			Metadata:   metadata,
+			CreatedAt:  createdAt,
+			UpdatedAt:  updatedAt,
 		}
 		auths = append(auths, auth)
 	}
@@ -588,7 +588,7 @@ func (s *PostgresStore) ListAllAuth(ctx context.Context) ([]*cliproxyauth.Auth, 
 		if provider == "" {
 			provider = "unknown"
 		}
-		attr := map[string]string{}
+		attr := map[string]string{"runtime_only": "true"}
 		if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 			attr["email"] = email
 		}
