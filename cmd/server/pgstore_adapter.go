@@ -90,6 +90,14 @@ func (a *pgStoreAdapter) ListAllAuth(ctx context.Context) ([]*coreauth.Auth, err
 	return a.s.ListAllAuth(ctx)
 }
 
+func (a *pgStoreAdapter) DeleteAuth(ctx context.Context, id string) error {
+	return a.s.DeleteAuthByID(ctx, id)
+}
+
+func (a *pgStoreAdapter) DeleteAllAuth(ctx context.Context) error {
+	return a.s.DeleteAllAuth(ctx)
+}
+
 func (a *pgStoreAdapter) GetConfigContent(ctx context.Context) (string, error) {
 	return a.s.GetConfigContent(ctx)
 }

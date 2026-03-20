@@ -488,6 +488,28 @@ func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	return s.deleteAuthRecord(ctx, recID)
 }
 
+// DeleteAuthByID removes an auth record by ID only, without node_ip constraint.
+func (s *PostgresStore) DeleteAuthByID(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("postgres store: id is empty")
+	}
+	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", s.fullTableName(s.cfg.AuthTable))
+	if _, err := s.db.ExecContext(ctx, query, id); err != nil {
+		return fmt.Errorf("postgres store: delete auth by id: %w", err)
+	}
+	return nil
+}
+
+// DeleteAllAuth removes all auth records from the database.
+func (s *PostgresStore) DeleteAllAuth(ctx context.Context) error {
+	query := fmt.Sprintf("DELETE FROM %s", s.fullTableName(s.cfg.AuthTable))
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("postgres store: delete all auth: %w", err)
+	}
+	return nil
+}
+
 // ListNodes returns all registered node IPs from the nodes registry table.
 func (s *PostgresStore) ListNodes(ctx context.Context) ([]string, error) {
 	query := fmt.Sprintf("SELECT node_ip FROM %s ORDER BY node_ip", s.fullTableName(defaultNodesTable))

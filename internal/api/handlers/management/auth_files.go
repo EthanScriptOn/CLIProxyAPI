@@ -653,6 +653,31 @@ func (h *Handler) DeleteAuthFile(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+
+	// PG mode: operate on database directly, skip local file operations.
+	if h.pgStore != nil {
+		if all := c.Query("all"); all == "true" || all == "1" || all == "*" {
+			if err := h.pgStore.DeleteAllAuth(ctx); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, gin.H{"status": "ok"})
+			return
+		}
+		name := c.Query("name")
+		if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+			c.JSON(400, gin.H{"error": "invalid name"})
+			return
+		}
+		if err := h.pgStore.DeleteAuth(ctx, name); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		h.disableAuth(ctx, name)
+		c.JSON(200, gin.H{"status": "ok"})
+		return
+	}
+
 	if all := c.Query("all"); all == "true" || all == "1" || all == "*" {
 		entries, err := os.ReadDir(h.cfg.AuthDir)
 		if err != nil {

@@ -64,6 +64,8 @@ type DBAPIKeyStore interface {
 	ListNodes(ctx context.Context) ([]string, error)
 	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)
 	ListAllAuth(ctx context.Context) ([]*coreauth.Auth, error)
+	DeleteAuth(ctx context.Context, id string) error
+	DeleteAllAuth(ctx context.Context) error
 }
 
 // ConfigPersister abstracts config persistence for PG mode (no local file).
