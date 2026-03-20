@@ -166,6 +166,10 @@ type Server struct {
 	// configFilePath is the absolute path to the YAML config file for persistence.
 	configFilePath string
 
+	// staticDir is the directory used to serve static assets (e.g. management.html).
+	// It is resolved once at startup and is independent of configFilePath.
+	staticDir string
+
 	// currentPath is the absolute path to the current working directory.
 	currentPath string
 
@@ -255,6 +259,14 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		wd = configFilePath
 	}
 
+	// Resolve static asset directory once at startup.
+	// configFilePath may be empty in PG/DB mode, so fall back to the working directory.
+	staticBasePath := configFilePath
+	if strings.TrimSpace(staticBasePath) == "" {
+		staticBasePath = wd
+	}
+	staticDir := managementasset.StaticDir(staticBasePath)
+
 	envAdminPassword, envAdminPasswordSet := os.LookupEnv("MANAGEMENT_PASSWORD")
 	envAdminPassword = strings.TrimSpace(envAdminPassword)
 	envManagementSecret := envAdminPasswordSet && envAdminPassword != ""
@@ -268,6 +280,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		requestLogger:       requestLogger,
 		loggerToggle:        toggle,
 		configFilePath:      configFilePath,
+		staticDir:           staticDir,
 		currentPath:         wd,
 		envManagementSecret: envManagementSecret,
 		wsRoutes:            make(map[string]struct{}),
@@ -701,8 +714,8 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	filePath := managementasset.FilePath(s.configFilePath)
-	if strings.TrimSpace(filePath) == "" {
+	filePath := filepath.Join(s.staticDir, managementasset.ManagementFileName)
+	if strings.TrimSpace(s.staticDir) == "" {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
@@ -715,7 +728,7 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 			}
 			// Synchronously ensure management.html is available with a detached context.
 			// Control panel bootstrap should not be canceled by client disconnects.
-			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
+			if !managementasset.EnsureLatestManagementHTML(context.Background(), s.staticDir, cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
