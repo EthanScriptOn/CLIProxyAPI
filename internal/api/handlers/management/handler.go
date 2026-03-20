@@ -39,6 +39,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 type Handler struct {
 	cfg                 *config.Config
 	configFilePath      string
+	configPersister     ConfigPersister // non-nil in PG mode
 	mu                  sync.Mutex
 	attemptsMu          sync.Mutex
 	failedAttempts      map[string]*attemptInfo // keyed by client IP
@@ -62,6 +63,13 @@ type DBAPIKeyStore interface {
 	QueryUsageAggregate(ctx context.Context, params UsageAggregateParams) ([]UsageAggregateRow, error)
 	ListNodes(ctx context.Context) ([]string, error)
 	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)
+	ListAllAuth(ctx context.Context) ([]*coreauth.Auth, error)
+}
+
+// ConfigPersister abstracts config persistence for PG mode (no local file).
+type ConfigPersister interface {
+	GetConfigContent(ctx context.Context) (string, error)
+	SaveConfigContent(ctx context.Context, content string) error
 }
 
 // NewHandler creates a new management handler instance.
@@ -149,6 +157,11 @@ func (h *Handler) SetLogDirectory(dir string) {
 // SetPostAuthHook registers a hook to be called after auth record creation but before persistence.
 func (h *Handler) SetPostAuthHook(hook coreauth.PostAuthHook) {
 	h.postAuthHook = hook
+}
+
+// SetConfigPersister registers a ConfigPersister for PG mode; when set, persist() uses it instead of files.
+func (h *Handler) SetConfigPersister(p ConfigPersister) {
+	h.configPersister = p
 }
 
 // Middleware enforces access control for management endpoints.
@@ -289,11 +302,33 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 	}
 }
 
-// persist saves the current in-memory config to disk.
+// persist saves the current in-memory config to storage (DB or file).
 func (h *Handler) persist(c *gin.Context) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	// Preserve comments when writing
+
+	if h.configPersister != nil {
+		// PG mode: fetch original YAML from DB, merge current config, save back.
+		ctx := c.Request.Context()
+		origContent, err := h.configPersister.GetConfigContent(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to load config from DB: %v", err)})
+			return false
+		}
+		merged, err := config.MergeConfigToYAML([]byte(origContent), h.cfg)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to merge config: %v", err)})
+			return false
+		}
+		if err = h.configPersister.SaveConfigContent(ctx, string(merged)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save config to DB: %v", err)})
+			return false
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		return true
+	}
+
+	// File mode: preserve comments when writing.
 	if err := config.SaveConfigPreserveComments(h.configFilePath, h.cfg); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save config: %v", err)})
 		return false

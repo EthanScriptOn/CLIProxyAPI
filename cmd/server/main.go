@@ -267,11 +267,14 @@ func main() {
 			return
 		}
 		cancel()
-		configFilePath = pgStoreInst.ConfigPath()
-		cfg, err = config.LoadConfigOptional(configFilePath, isCloudDeploy)
+		configFilePath = ""
+		var cfgContent string
+		cfgContent, err = pgStoreInst.GetConfigContent(context.Background())
 		if err == nil {
-			cfg.AuthDir = pgStoreInst.AuthDir()
-			log.Infof("postgres-backed token store enabled, workspace path: %s", pgStoreInst.WorkDir())
+			cfg, err = config.ParseConfigContent(cfgContent, isCloudDeploy)
+			if err == nil {
+				log.Infof("postgres-backed token store enabled (DB-only mode)")
+			}
 		}
 	} else if useObjectStore {
 		if objectStoreLocalPath == "" {
@@ -407,7 +410,16 @@ func main() {
 	// In cloud deploy mode, check if we have a valid configuration
 	var configFileExists bool
 	if isCloudDeploy {
-		if info, errStat := os.Stat(configFilePath); errStat != nil {
+		if configFilePath == "" {
+			// PG mode: config comes from DB, not a file.
+			if cfg.Port != 0 {
+				log.Info("Cloud deploy mode: Configuration loaded from database; starting service")
+				configFileExists = true
+			} else {
+				log.Info("Cloud deploy mode: No valid configuration in database; standing by for configuration")
+				configFileExists = false
+			}
+		} else if info, errStat := os.Stat(configFilePath); errStat != nil {
 			// Don't mislead: API server will not start until configuration is provided.
 			log.Info("Cloud deploy mode: No configuration file detected; standing by for configuration")
 			configFileExists = false
@@ -548,6 +560,7 @@ func main() {
 				var tuiServerOpts []internalapi.ServerOption
 				if pgAdapter != nil {
 					tuiServerOpts = append(tuiServerOpts, internalapi.WithManagementDBStore(pgAdapter))
+					tuiServerOpts = append(tuiServerOpts, internalapi.WithConfigPersister(pgAdapter))
 				}
 				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password, tuiServerOpts...)
 
@@ -595,6 +608,7 @@ func main() {
 			var srvOpts []internalapi.ServerOption
 			if pgAdapter != nil {
 				srvOpts = append(srvOpts, internalapi.WithManagementDBStore(pgAdapter))
+				srvOpts = append(srvOpts, internalapi.WithConfigPersister(pgAdapter))
 			}
 			cmd.StartService(cfg, configFilePath, password, srvOpts...)
 		}

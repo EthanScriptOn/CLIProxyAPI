@@ -270,12 +270,19 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 		return
 	}
 
-	// When pgStore is configured and a node_ip filter is provided, query DB directly.
 	nodeIP := strings.TrimSpace(c.Query("node_ip"))
-	if h.pgStore != nil && nodeIP != "" {
+
+	// When pgStore is configured, always query DB.
+	if h.pgStore != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
-		auths, err := h.pgStore.ListAuthByNode(ctx, nodeIP)
+		var auths []*coreauth.Auth
+		var err error
+		if nodeIP != "" {
+			auths, err = h.pgStore.ListAuthByNode(ctx, nodeIP)
+		} else {
+			auths, err = h.pgStore.ListAllAuth(ctx)
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

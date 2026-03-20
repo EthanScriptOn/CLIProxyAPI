@@ -85,6 +85,18 @@ func (a *pgStoreAdapter) ListAuthByNode(ctx context.Context, nodeIP string) ([]*
 	return a.s.ListAuthByNode(ctx, nodeIP)
 }
 
+func (a *pgStoreAdapter) ListAllAuth(ctx context.Context) ([]*coreauth.Auth, error) {
+	return a.s.ListAllAuth(ctx)
+}
+
+func (a *pgStoreAdapter) GetConfigContent(ctx context.Context) (string, error) {
+	return a.s.GetConfigContent(ctx)
+}
+
+func (a *pgStoreAdapter) SaveConfigContent(ctx context.Context, content string) error {
+	return a.s.SaveConfigContent(ctx, content)
+}
+
 // usageStoreAdapter bridges store.PostgresStore to usage.UsageStoreWriter.
 func (a *usageStoreAdapter) InsertUsageRecord(ctx context.Context, r usage.UsageDBRecord) {
 	nodeIP := r.NodeIP

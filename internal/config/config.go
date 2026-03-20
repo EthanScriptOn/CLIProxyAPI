@@ -651,6 +651,127 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	return &cfg, nil
 }
 
+// ParseConfigContent parses a YAML config string without any file I/O.
+// Used in PG mode where config lives in memory, not on disk.
+// The optional flag mirrors LoadConfigOptional: if true, empty/invalid content returns an empty Config.
+func ParseConfigContent(content string, optional bool) (*Config, error) {
+	data := []byte(content)
+	if optional && len(data) == 0 {
+		return &Config{}, nil
+	}
+
+	var cfg Config
+	cfg.Host = ""
+	cfg.LoggingToFile = false
+	cfg.LogsMaxTotalSizeMB = 0
+	cfg.ErrorLogsMaxFiles = 10
+	cfg.UsageStatisticsEnabled = false
+	cfg.DisableCooling = false
+	cfg.Pprof.Enable = false
+	cfg.Pprof.Addr = DefaultPprofAddr
+	cfg.AmpCode.RestrictManagementToLocalhost = false
+	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		if optional {
+			return &Config{}, nil
+		}
+		return nil, fmt.Errorf("failed to parse config content: %w", err)
+	}
+
+	// Hash plaintext secret key if present (bcrypt hashed values start with $2a/$2b/$2y).
+	if cfg.RemoteManagement.SecretKey != "" && !looksLikeBcrypt(cfg.RemoteManagement.SecretKey) {
+		hashed, errHash := hashSecret(cfg.RemoteManagement.SecretKey)
+		if errHash != nil {
+			return nil, fmt.Errorf("failed to hash remote management key: %w", errHash)
+		}
+		cfg.RemoteManagement.SecretKey = hashed
+		// Note: in PG mode the caller (Bootstrap.ensureDefaultSecretKey) handles
+		// writing the hash back to the DB; we do not re-persist here.
+	}
+
+	cfg.RemoteManagement.PanelGitHubRepository = strings.TrimSpace(cfg.RemoteManagement.PanelGitHubRepository)
+	if cfg.RemoteManagement.PanelGitHubRepository == "" {
+		cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
+	}
+	cfg.Pprof.Addr = strings.TrimSpace(cfg.Pprof.Addr)
+	if cfg.Pprof.Addr == "" {
+		cfg.Pprof.Addr = DefaultPprofAddr
+	}
+	if cfg.LogsMaxTotalSizeMB < 0 {
+		cfg.LogsMaxTotalSizeMB = 0
+	}
+	if cfg.ErrorLogsMaxFiles < 0 {
+		cfg.ErrorLogsMaxFiles = 10
+	}
+	if cfg.MaxRetryCredentials < 0 {
+		cfg.MaxRetryCredentials = 0
+	}
+
+	cfg.SanitizeGeminiKeys()
+	cfg.SanitizeVertexCompatKeys()
+	cfg.SanitizeCodexKeys()
+	cfg.SanitizeClaudeKeys()
+	cfg.SanitizeOpenAICompatibility()
+	cfg.OAuthExcludedModels = NormalizeOAuthExcludedModels(cfg.OAuthExcludedModels)
+	cfg.SanitizeOAuthModelAlias()
+	cfg.SanitizePayloadRules()
+
+	return &cfg, nil
+}
+
+// MergeConfigToYAML merges cfg into originalYAML (preserving comments/ordering) and returns the
+// result as bytes. This is the PG-mode equivalent of SaveConfigPreserveComments (no file I/O).
+func MergeConfigToYAML(originalYAML []byte, cfg *Config) ([]byte, error) {
+	var original yaml.Node
+	if err := yaml.Unmarshal(originalYAML, &original); err != nil {
+		return nil, err
+	}
+	if original.Kind != yaml.DocumentNode || len(original.Content) == 0 {
+		return nil, fmt.Errorf("invalid yaml document structure")
+	}
+	if original.Content[0] == nil || original.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("expected root mapping node")
+	}
+
+	rendered, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var generated yaml.Node
+	if err = yaml.Unmarshal(rendered, &generated); err != nil {
+		return nil, err
+	}
+	if generated.Kind != yaml.DocumentNode || len(generated.Content) == 0 || generated.Content[0] == nil {
+		return nil, fmt.Errorf("invalid generated yaml structure")
+	}
+	if generated.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("expected generated root mapping node")
+	}
+
+	removeLegacyAuthBlock(original.Content[0])
+	removeLegacyOpenAICompatAPIKeys(original.Content[0])
+	removeLegacyAmpKeys(original.Content[0])
+	removeLegacyGenerativeLanguageKeys(original.Content[0])
+
+	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-excluded-models")
+	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-model-alias")
+
+	mergeMappingPreserve(original.Content[0], generated.Content[0])
+	normalizeCollectionNodeStyles(original.Content[0])
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err = enc.Encode(&original); err != nil {
+		_ = enc.Close()
+		return nil, err
+	}
+	if err = enc.Close(); err != nil {
+		return nil, err
+	}
+	return NormalizeCommentIndentation(buf.Bytes()), nil
+}
+
 // SanitizePayloadRules validates raw JSON payload rule params and drops invalid rules.
 func (cfg *Config) SanitizePayloadRules() {
 	if cfg == nil {

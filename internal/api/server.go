@@ -54,6 +54,7 @@ type serverOptionConfig struct {
 	keepAliveOnTimeout   func()
 	postAuthHook         auth.PostAuthHook
 	managementDBStore    managementHandlers.DBAPIKeyStore
+	configPersister      managementHandlers.ConfigPersister
 }
 
 // ServerOption customises HTTP server construction.
@@ -125,6 +126,14 @@ func WithPostAuthHook(hook auth.PostAuthHook) ServerOption {
 func WithManagementDBStore(store managementHandlers.DBAPIKeyStore) ServerOption {
 	return func(cfg *serverOptionConfig) {
 		cfg.managementDBStore = store
+	}
+}
+
+// WithConfigPersister injects a ConfigPersister into the management handler for PG mode.
+// When set, config changes are persisted to the database instead of the local file.
+func WithConfigPersister(p managementHandlers.ConfigPersister) ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.configPersister = p
 	}
 }
 
@@ -285,6 +294,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	if optionState.managementDBStore != nil {
 		s.mgmt.SetPGStore(optionState.managementDBStore)
+	}
+	if optionState.configPersister != nil {
+		s.mgmt.SetConfigPersister(optionState.configPersister)
 	}
 	s.localPassword = optionState.localPassword
 

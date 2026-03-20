@@ -27,17 +27,21 @@ func matchProvider(provider string, targets []string) (string, bool) {
 }
 
 func (w *Watcher) start(ctx context.Context) error {
-	if errAddConfig := w.watcher.Add(w.configPath); errAddConfig != nil {
-		log.Errorf("failed to watch config file %s: %v", w.configPath, errAddConfig)
-		return errAddConfig
+	if w.configPath != "" {
+		if errAddConfig := w.watcher.Add(w.configPath); errAddConfig != nil {
+			log.Errorf("failed to watch config file %s: %v", w.configPath, errAddConfig)
+			return errAddConfig
+		}
+		log.Debugf("watching config file: %s", w.configPath)
 	}
-	log.Debugf("watching config file: %s", w.configPath)
 
-	if errAddAuthDir := w.watcher.Add(w.authDir); errAddAuthDir != nil {
-		log.Errorf("failed to watch auth directory %s: %v", w.authDir, errAddAuthDir)
-		return errAddAuthDir
+	if w.authDir != "" {
+		if errAddAuthDir := w.watcher.Add(w.authDir); errAddAuthDir != nil {
+			log.Errorf("failed to watch auth directory %s: %v", w.authDir, errAddAuthDir)
+			return errAddAuthDir
+		}
+		log.Debugf("watching auth directory: %s", w.authDir)
 	}
-	log.Debugf("watching auth directory: %s", w.authDir)
 
 	go w.processEvents(ctx)
 
