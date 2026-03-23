@@ -343,6 +343,12 @@ main() {
     done
 
     # 开放防火墙（仅开放服务端口，由 nginx 网关对外）
+    if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+        for port in "${INST_PORTS[@]}"; do
+            ufw allow "${port}/tcp" &>/dev/null && log_success "ufw 已放行端口 ${port}"
+        done
+        ufw reload &>/dev/null
+    fi
 
     # 汇总
     echo ""

@@ -331,6 +331,55 @@ func (s *Service) applyCoreAuthRemoval(ctx context.Context, id string) {
 	}
 }
 
+// startDBAuthPoller starts a background goroutine that reloads auth records
+// from the store every 10 seconds and syncs model registrations accordingly.
+// This ensures new accounts added after startup are picked up without restarting.
+func (s *Service) startDBAuthPoller(ctx context.Context) {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		// Snapshot of known auth IDs at poller start.
+		knownIDs := make(map[string]struct{})
+		for _, a := range s.coreManager.List() {
+			knownIDs[a.ID] = struct{}{}
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pollCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				if err := s.coreManager.Load(pollCtx); err != nil {
+					log.Warnf("db auth poller: failed to reload auth store: %v", err)
+					cancel()
+					continue
+				}
+				cancel()
+
+				currentIDs := make(map[string]struct{})
+				for _, a := range s.coreManager.List() {
+					currentIDs[a.ID] = struct{}{}
+					s.applyCoreAuthAddOrUpdate(ctx, a)
+				}
+
+				// Unregister auth records that were removed from the store.
+				for id := range knownIDs {
+					if _, exists := currentIDs[id]; !exists {
+						s.applyCoreAuthRemoval(ctx, id)
+					}
+				}
+
+				knownIDs = currentIDs
+			}
+		}
+	}()
+}
+
 func (s *Service) applyRetryConfig(cfg *config.Config) {
 	if s == nil || s.coreManager == nil || cfg == nil {
 		return
@@ -637,6 +686,11 @@ func (s *Service) Run(ctx context.Context) error {
 		s.coreManager.StartAutoRefresh(context.Background(), interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
 	}
+
+	// Poll the auth store every 10s so accounts added after startup are
+	// picked up without requiring a service restart.
+	s.startDBAuthPoller(ctx)
+	log.Info("db auth poller started (interval=10s)")
 
 	select {
 	case <-ctx.Done():
