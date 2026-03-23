@@ -129,3 +129,11 @@ func (a *usageStoreAdapter) InsertUsageRecord(ctx context.Context, r usage.Usage
 	})
 }
 
+func (a *pgStoreAdapter) GetManagementPasswordHash(ctx context.Context) (string, error) {
+	return a.s.GetManagementPasswordHash(ctx)
+}
+
+func (a *pgStoreAdapter) SetManagementPasswordHash(ctx context.Context, hash string) error {
+	return a.s.SetManagementPasswordHash(ctx, hash)
+}
+

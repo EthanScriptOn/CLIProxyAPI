@@ -264,6 +264,54 @@ func (s *PostgresStore) Bootstrap(ctx context.Context, exampleConfigPath string)
 	if err := s.ensureDefaultSecretKey(ctx); err != nil {
 		log.WithError(err).Warn("failed to ensure default secret key")
 	}
+	if err := s.ensureDefaultManagementPassword(ctx); err != nil {
+		log.WithError(err).Warn("failed to ensure default management password")
+	}
+	return nil
+}
+
+const managementPasswordKey = "management_password"
+
+// GetManagementPasswordHash returns the bcrypt hash of the management password stored in the DB.
+// Returns empty string if not set.
+func (s *PostgresStore) GetManagementPasswordHash(ctx context.Context) (string, error) {
+	query := fmt.Sprintf("SELECT content FROM %s WHERE id = $1", s.fullTableName(s.cfg.ConfigTable))
+	var hash string
+	err := s.db.QueryRowContext(ctx, query, managementPasswordKey).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return hash, err
+}
+
+// SetManagementPasswordHash persists a bcrypt hash as the management password in the DB.
+func (s *PostgresStore) SetManagementPasswordHash(ctx context.Context, hash string) error {
+	table := s.fullTableName(s.cfg.ConfigTable)
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO %s (id, content, created_at, updated_at)
+		VALUES ($1, $2, NOW(), NOW())
+		ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+	`, table), managementPasswordKey, hash)
+	return err
+}
+
+// ensureDefaultManagementPassword sets the management password to "admin" (bcrypt hashed) if unset.
+func (s *PostgresStore) ensureDefaultManagementPassword(ctx context.Context) error {
+	existing, err := s.GetManagementPasswordHash(ctx)
+	if err != nil {
+		return err
+	}
+	if existing != "" {
+		return nil
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("postgres store: hash default management password: %w", err)
+	}
+	if err := s.SetManagementPasswordHash(ctx, string(hashed)); err != nil {
+		return fmt.Errorf("postgres store: persist default management password: %w", err)
+	}
+	log.Info("postgres store: default management password set to 'admin'")
 	return nil
 }
 

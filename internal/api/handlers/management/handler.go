@@ -62,6 +62,8 @@ type DBAPIKeyStore interface {
 	DeleteAPIKey(ctx context.Context, key string) error
 	QueryUsageAggregate(ctx context.Context, params UsageAggregateParams) ([]UsageAggregateRow, error)
 	ListNodes(ctx context.Context) ([]string, error)
+	GetManagementPasswordHash(ctx context.Context) (string, error)
+	SetManagementPasswordHash(ctx context.Context, hash string) error
 	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)
 	ListAllAuth(ctx context.Context) ([]*coreauth.Auth, error)
 	DeleteAuth(ctx context.Context, id string) error
@@ -189,10 +191,16 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 			allowRemote = cfg.RemoteManagement.AllowRemote
 			secretHash = cfg.RemoteManagement.SecretKey
 		}
-		if h.allowRemoteOverride {
+		if h.allowRemoteOverride || h.pgStore != nil {
 			allowRemote = true
 		}
 		envSecret := h.envSecret
+
+		// When postgres store is configured, fetch the management password from DB.
+		dbHash := ""
+		if h.pgStore != nil {
+			dbHash, _ = h.pgStore.GetManagementPasswordHash(c.Request.Context())
+		}
 
 		fail := func() {}
 		if !localClient {
@@ -234,7 +242,7 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 				h.attemptsMu.Unlock()
 			}
 		}
-		if secretHash == "" && envSecret == "" {
+		if dbHash == "" && secretHash == "" && envSecret == "" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "remote management key not set"})
 			return
 		}
@@ -280,6 +288,27 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 				h.attemptsMu.Unlock()
 			}
 			c.Next()
+			return
+		}
+
+		// Check DB-stored password (PG mode, takes priority over config hash).
+		if dbHash != "" {
+			if bcrypt.CompareHashAndPassword([]byte(dbHash), []byte(provided)) == nil {
+				if !localClient {
+					h.attemptsMu.Lock()
+					if ai := h.failedAttempts[clientIP]; ai != nil {
+						ai.count = 0
+						ai.blockedUntil = time.Time{}
+					}
+					h.attemptsMu.Unlock()
+				}
+				c.Next()
+				return
+			}
+			if !localClient {
+				fail()
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid management key"})
 			return
 		}
 

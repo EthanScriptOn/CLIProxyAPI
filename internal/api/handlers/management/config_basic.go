@@ -394,6 +394,16 @@ func (h *Handler) ChangeSecretKey(c *gin.Context) {
 		return
 	}
 
+	// When postgres store is configured, persist the password to DB directly.
+	if h.pgStore != nil {
+		if err := h.pgStore.SetManagementPasswordHash(c.Request.Context(), string(hashed)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save key to database: %v", err)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "management key updated"})
+		return
+	}
+
 	h.cfg.RemoteManagement.SecretKey = string(hashed)
 	h.persist(c)
 }
