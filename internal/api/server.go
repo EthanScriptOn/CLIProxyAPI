@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 	"proxycore/api/v6/internal/access"
 	configaccess "proxycore/api/v6/internal/access/config_access"
 	managementHandlers "proxycore/api/v6/internal/api/handlers/management"
@@ -37,8 +39,6 @@ import (
 	"proxycore/api/v6/sdk/api/handlers/openai"
 	sdkAuth "proxycore/api/v6/sdk/auth"
 	"proxycore/api/v6/sdk/cliproxy/auth"
-	log "github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authentication successful</title><script>setTimeout(function(){window.close();},5000);</script></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><p>This window will close automatically in 5 seconds.</p></body></html>`
@@ -543,6 +543,8 @@ func (s *Server) registerManagementRoutes() {
 	}
 
 	log.Info("management routes registered after secret key configuration")
+
+	s.engine.POST("/v0/management/login", s.managementAvailabilityMiddleware(), s.mgmt.Login)
 
 	mgmt := s.engine.Group("/v0/management")
 	mgmt.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
@@ -1203,6 +1205,7 @@ func (s *Server) QuotaMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
 // using the configured authentication providers. When no providers are configured,
 // all requests are rejected with 401.
 func AuthMiddleware(manager *sdkaccess.Manager) gin.HandlerFunc {

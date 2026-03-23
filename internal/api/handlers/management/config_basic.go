@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 	"proxycore/api/v6/internal/config"
 	"proxycore/api/v6/internal/util"
 	sdkconfig "proxycore/api/v6/sdk/config"
-	log "github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -30,6 +30,27 @@ func (h *Handler) GetConfig(c *gin.Context) {
 		return
 	}
 	c.JSON(200, new(*h.cfg))
+}
+
+// Login validates the provided management key without loading the full config.
+func (h *Handler) Login(c *gin.Context) {
+	var body struct {
+		ManagementKey string `json:"managementKey"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	clientIP := c.ClientIP()
+	localClient := clientIP == "127.0.0.1" || clientIP == "::1"
+	result := h.validateManagementKey(c.Request.Context(), clientIP, strings.TrimSpace(body.ManagementKey), localClient)
+	if !result.OK {
+		c.JSON(result.StatusCode, gin.H{"error": result.Message})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 type releaseInfo struct {
