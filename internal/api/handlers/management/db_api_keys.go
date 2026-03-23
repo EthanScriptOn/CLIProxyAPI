@@ -8,10 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	configaccess "proxycore/api/v6/internal/access/config_access"
-	log "github.com/sirupsen/logrus"
+	sdkaccess "proxycore/api/v6/sdk/access"
 )
 
-const dbKeySyncInterval = 30 * time.Second
+const dbKeySyncInterval = 10 * time.Second
 
 // APIKeyRecord mirrors store.APIKeyRecord but lives in this package to avoid import cycles.
 type APIKeyRecord struct {
@@ -63,19 +63,8 @@ func (h *Handler) startDBKeySync() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		records, err := h.pgStore.ListAPIKeys(ctx)
+		h.syncDBKeysToMemory(ctx)
 		cancel()
-		if err != nil {
-			log.WithError(err).Debug("db key sync: failed to list api keys")
-			continue
-		}
-		keys := make([]string, 0, len(records))
-		for _, r := range records {
-			if !r.Disabled {
-				keys = append(keys, r.Key)
-			}
-		}
-		configaccess.UpdateKeys(keys)
 	}
 }
 
@@ -95,6 +84,10 @@ func (h *Handler) syncDBKeysToMemory(ctx context.Context) {
 		}
 	}
 	configaccess.UpdateKeys(keys)
+	// Re-snapshot providers in case UpdateKeys created a new provider instance.
+	if h.accessManager != nil {
+		h.accessManager.SetProviders(sdkaccess.RegisteredProviders())
+	}
 }
 
 // ListDBAPIKeys returns all api_key records from the database.

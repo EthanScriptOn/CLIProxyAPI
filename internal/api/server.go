@@ -316,6 +316,10 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 				}
 			}
 			configaccess.UpdateKeys(keys)
+			// Re-snapshot providers so the access manager includes the newly registered configaccess provider.
+			if s.accessManager != nil {
+				s.accessManager.SetProviders(sdkaccess.RegisteredProviders())
+			}
 		}
 	}
 	if optionState.configPersister != nil {

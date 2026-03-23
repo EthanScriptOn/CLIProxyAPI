@@ -688,6 +688,10 @@ func (s *PostgresStore) syncConfigFromDatabase(ctx context.Context, exampleConfi
 }
 
 func (s *PostgresStore) persistAuth(ctx context.Context, relID string, data []byte) error {
+	return s.persistAuthForNode(ctx, relID, data, s.cfg.NodeIP)
+}
+
+func (s *PostgresStore) persistAuthForNode(ctx context.Context, relID string, data []byte, nodeIP string) error {
 	jsonPayload := json.RawMessage(data)
 	query := fmt.Sprintf(`
 		INSERT INTO %s (id, content, node_ip, created_at, updated_at)
@@ -695,10 +699,67 @@ func (s *PostgresStore) persistAuth(ctx context.Context, relID string, data []by
 		ON CONFLICT (id, node_ip)
 		DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
 	`, s.fullTableName(s.cfg.AuthTable))
-	if _, err := s.db.ExecContext(ctx, query, relID, jsonPayload, s.cfg.NodeIP); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, relID, jsonPayload, nodeIP); err != nil {
 		return fmt.Errorf("postgres store: upsert auth record: %w", err)
 	}
 	return nil
+}
+
+// SaveForNode persists the auth record under the specified nodeIP instead of this instance's NodeIP.
+// Falls back to Save when nodeIP is empty.
+func (s *PostgresStore) SaveForNode(ctx context.Context, auth *cliproxyauth.Auth, nodeIP string) (string, error) {
+	nodeIP = strings.TrimSpace(nodeIP)
+	if nodeIP == "" {
+		return s.Save(ctx, auth)
+	}
+	if auth == nil {
+		return "", fmt.Errorf("postgres store: auth is nil")
+	}
+
+	recID := strings.TrimSpace(auth.ID)
+	if recID == "" {
+		recID = strings.TrimSpace(auth.FileName)
+	}
+	if recID == "" {
+		return "", fmt.Errorf("postgres store: auth has no id or filename")
+	}
+	recID = filepath.ToSlash(filepath.Base(recID))
+
+	var raw []byte
+	var err error
+	switch {
+	case auth.Storage != nil:
+		tmp, errTmp := os.CreateTemp("", "pgstore-auth-*.json")
+		if errTmp != nil {
+			return "", fmt.Errorf("postgres store: create temp file: %w", errTmp)
+		}
+		tmpPath := tmp.Name()
+		tmp.Close()
+		defer os.Remove(tmpPath)
+		if err = auth.Storage.SaveTokenToFile(tmpPath); err != nil {
+			return "", fmt.Errorf("postgres store: serialize storage token: %w", err)
+		}
+		raw, err = os.ReadFile(tmpPath)
+		if err != nil {
+			return "", fmt.Errorf("postgres store: read serialized token: %w", err)
+		}
+	case auth.Metadata != nil:
+		raw, err = json.Marshal(auth.Metadata)
+		if err != nil {
+			return "", fmt.Errorf("postgres store: marshal metadata: %w", err)
+		}
+	default:
+		return "", fmt.Errorf("postgres store: nothing to persist for %s", recID)
+	}
+
+	if strings.TrimSpace(auth.FileName) == "" {
+		auth.FileName = recID
+	}
+
+	if err = s.persistAuthForNode(ctx, recID, raw, nodeIP); err != nil {
+		return "", err
+	}
+	return recID, nil
 }
 
 // enqueueCooldown schedules an async write of the auth's cooldown/quota state.

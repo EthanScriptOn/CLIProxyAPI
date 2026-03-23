@@ -1,6 +1,7 @@
 package management
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -190,6 +191,11 @@ func (h *Handler) DeleteAPIKeys(c *gin.Context) {
 
 func (h *Handler) refreshAccessKeys() {
 	configaccess.Register(&h.cfg.SDKConfig)
+	// In PG mode, configaccess.Register may have unregistered the provider when the config YAML
+	// has no api_keys. Re-sync DB keys immediately so the access manager keeps them.
+	if h.pgStore != nil {
+		h.syncDBKeysToMemory(context.Background())
+	}
 	if h.accessManager != nil {
 		h.accessManager.SetProviders(sdkaccess.RegisteredProviders())
 	}

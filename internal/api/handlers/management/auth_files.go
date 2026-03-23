@@ -1028,6 +1028,17 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 			return "", fmt.Errorf("post-auth hook failed: %w", err)
 		}
 	}
+	// If the original request specified a target node_ip, save under that node instead of this one.
+	if info := coreauth.GetRequestInfo(ctx); info != nil {
+		if nodeIP := strings.TrimSpace(info.Query.Get("node_ip")); nodeIP != "" {
+			type nodeAwareStore interface {
+				SaveForNode(context.Context, *coreauth.Auth, string) (string, error)
+			}
+			if nas, ok := store.(nodeAwareStore); ok {
+				return nas.SaveForNode(ctx, record, nodeIP)
+			}
+		}
+	}
 	return store.Save(ctx, record)
 }
 
