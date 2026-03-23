@@ -216,6 +216,19 @@ func (s *PostgresStore) EnsureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_node_ip ON %s (node_ip)`,
 		usageTable,
 	))
+	// Migrate existing usage_records tables that may be missing newer columns.
+	for _, col := range []struct{ name, def string }{
+		{"node_ip", "TEXT NOT NULL DEFAULT ''"},
+		{"auth_id", "TEXT NOT NULL DEFAULT ''"},
+		{"source", "TEXT NOT NULL DEFAULT ''"},
+		{"reasoning_tokens", "BIGINT NOT NULL DEFAULT 0"},
+		{"cached_tokens", "BIGINT NOT NULL DEFAULT 0"},
+	} {
+		_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+			`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`,
+			usageTable, col.name, col.def,
+		))
+	}
 
 	// nodes registry table — each node upserts itself on startup
 	nodesTable := s.fullTableName(defaultNodesTable)
