@@ -482,6 +482,12 @@ func (s *Service) Run(ctx context.Context) error {
 		if errLoad := s.coreManager.Load(ctx); errLoad != nil {
 			log.Warnf("failed to load auth store: %v", errLoad)
 		}
+		// In DB-only mode the file watcher never fires for pre-existing records,
+		// so models would never be registered. Bootstrap model registration here
+		// for every auth that was just loaded from the store.
+		for _, a := range s.coreManager.List() {
+			s.applyCoreAuthAddOrUpdate(ctx, a)
+		}
 	}
 
 	tokenResult, err := s.tokenProvider.Load(ctx, s.cfg)
