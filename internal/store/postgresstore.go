@@ -28,6 +28,7 @@ const (
 	defaultAPIKeysTable = "api_keys"
 	defaultUsageTable   = "usage_records"
 	defaultNodesTable   = "nodes"
+	defaultProxiesTable = "proxies"
 )
 
 // PostgresStoreConfig captures configuration required to initialize a Postgres-backed store.
@@ -249,6 +250,20 @@ func (s *PostgresStore) EnsureSchema(ctx context.Context) error {
 			VALUES ($1, NOW(), NOW())
 			ON CONFLICT (node_ip) DO UPDATE SET last_seen_at = NOW()
 		`, nodesTable), s.cfg.NodeIP)
+	}
+
+	proxiesTable := s.fullTableName(defaultProxiesTable)
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			name TEXT PRIMARY KEY,
+			proxy_url TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`, proxiesTable)); err != nil {
+		return fmt.Errorf("postgres store: create proxies table: %w", err)
 	}
 
 	return nil
@@ -584,6 +599,15 @@ type NodeRecord struct {
 	NodeIP       string
 	RegisteredAt time.Time
 	LastSeenAt   time.Time
+}
+
+type ProxyRecord struct {
+	Name        string
+	ProxyURL    string
+	Description string
+	Enabled     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ListNodeRecords returns node registry entries with timestamps.
@@ -1076,6 +1100,80 @@ func (s *PostgresStore) flushAuthDirtyBatch(ctx context.Context, batch map[strin
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *PostgresStore) ListProxies(ctx context.Context) ([]ProxyRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("postgres store: not initialized")
+	}
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(
+		`SELECT name, proxy_url, description, enabled, created_at, updated_at FROM %s ORDER BY LOWER(name), created_at`,
+		s.fullTableName(defaultProxiesTable),
+	))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var records []ProxyRecord
+	for rows.Next() {
+		var r ProxyRecord
+		if err = rows.Scan(&r.Name, &r.ProxyURL, &r.Description, &r.Enabled, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
+func (s *PostgresStore) SaveProxy(ctx context.Context, r ProxyRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	name := strings.TrimSpace(r.Name)
+	proxyURL := strings.TrimSpace(r.ProxyURL)
+	if name == "" || proxyURL == "" {
+		return fmt.Errorf("postgres store: name and proxy_url are required")
+	}
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO %s (name, proxy_url, description, enabled, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		ON CONFLICT (name) DO UPDATE
+		SET proxy_url = EXCLUDED.proxy_url,
+		    description = EXCLUDED.description,
+		    enabled = EXCLUDED.enabled,
+		    updated_at = NOW()
+	`, s.fullTableName(defaultProxiesTable)), name, proxyURL, strings.TrimSpace(r.Description), r.Enabled)
+	return err
+}
+
+func (s *PostgresStore) UpdateProxy(ctx context.Context, oldName string, r ProxyRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	oldName = strings.TrimSpace(oldName)
+	name := strings.TrimSpace(r.Name)
+	proxyURL := strings.TrimSpace(r.ProxyURL)
+	if oldName == "" || name == "" || proxyURL == "" {
+		return fmt.Errorf("postgres store: oldName, name and proxy_url are required")
+	}
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s
+		SET name = $2, proxy_url = $3, description = $4, enabled = $5, updated_at = NOW()
+		WHERE name = $1
+	`, s.fullTableName(defaultProxiesTable)), oldName, name, proxyURL, strings.TrimSpace(r.Description), r.Enabled)
+	return err
+}
+
+func (s *PostgresStore) DeleteProxy(ctx context.Context, name string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("postgres store: name is required")
+	}
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE name = $1`, s.fullTableName(defaultProxiesTable)), name)
+	return err
 }
 
 func (s *PostgresStore) deleteAuthRecord(ctx context.Context, relID string) error {

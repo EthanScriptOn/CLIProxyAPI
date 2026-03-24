@@ -114,6 +114,47 @@ func (a *pgStoreAdapter) DeleteNode(ctx context.Context, nodeIP string) error {
 	return a.s.DeleteNode(ctx, nodeIP)
 }
 
+func (a *pgStoreAdapter) ListProxies(ctx context.Context) ([]management.ProxyRecord, error) {
+	raw, err := a.s.ListProxies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]management.ProxyRecord, len(raw))
+	for i, r := range raw {
+		out[i] = management.ProxyRecord{
+			Name:        r.Name,
+			ProxyURL:    r.ProxyURL,
+			Description: r.Description,
+			Enabled:     r.Enabled,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		}
+	}
+	return out, nil
+}
+
+func (a *pgStoreAdapter) SaveProxy(ctx context.Context, r management.ProxyRecord) error {
+	return a.s.SaveProxy(ctx, store.ProxyRecord{
+		Name:        r.Name,
+		ProxyURL:    r.ProxyURL,
+		Description: r.Description,
+		Enabled:     r.Enabled,
+	})
+}
+
+func (a *pgStoreAdapter) UpdateProxy(ctx context.Context, oldName string, r management.ProxyRecord) error {
+	return a.s.UpdateProxy(ctx, oldName, store.ProxyRecord{
+		Name:        r.Name,
+		ProxyURL:    r.ProxyURL,
+		Description: r.Description,
+		Enabled:     r.Enabled,
+	})
+}
+
+func (a *pgStoreAdapter) DeleteProxy(ctx context.Context, name string) error {
+	return a.s.DeleteProxy(ctx, name)
+}
+
 func (a *pgStoreAdapter) ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error) {
 	return a.s.ListAuthByNode(ctx, nodeIP)
 }

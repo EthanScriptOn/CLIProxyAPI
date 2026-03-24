@@ -49,6 +49,15 @@ type NodeRecord struct {
 	LastSeenAt   time.Time `json:"last_seen_at"`
 }
 
+type ProxyRecord struct {
+	Name        string    `json:"name"`
+	ProxyURL    string    `json:"proxy_url"`
+	Description string    `json:"description"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // SetPGStore injects the database store into the management handler.
 func (h *Handler) SetPGStore(s DBAPIKeyStore) {
 	if h == nil {

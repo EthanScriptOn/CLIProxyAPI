@@ -594,6 +594,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/db-api-keys", s.mgmt.ListDBAPIKeys)
 		mgmt.POST("/db-api-keys", s.mgmt.CreateDBAPIKey)
 		mgmt.DELETE("/db-api-keys/:key", s.mgmt.DeleteDBAPIKey)
+		mgmt.GET("/proxies", s.mgmt.ListProxies)
+		mgmt.POST("/proxies", s.mgmt.CreateProxy)
+		mgmt.PATCH("/proxies", s.mgmt.UpdateProxy)
+		mgmt.DELETE("/proxies/:name", s.mgmt.DeleteProxy)
 
 		mgmt.GET("/api-key-quotas", s.mgmt.GetAPIKeyQuotas)
 		mgmt.PUT("/api-key-quotas", s.mgmt.PutAPIKeyQuotas)

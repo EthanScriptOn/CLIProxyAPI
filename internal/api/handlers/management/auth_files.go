@@ -20,6 +20,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"proxycore/api/v6/internal/auth/antigravity"
 	"proxycore/api/v6/internal/auth/claude"
 	"proxycore/api/v6/internal/auth/codex"
@@ -27,16 +31,13 @@ import (
 	iflowauth "proxycore/api/v6/internal/auth/iflow"
 	"proxycore/api/v6/internal/auth/kimi"
 	"proxycore/api/v6/internal/auth/qwen"
+	"proxycore/api/v6/internal/config"
 	"proxycore/api/v6/internal/interfaces"
 	"proxycore/api/v6/internal/misc"
 	"proxycore/api/v6/internal/registry"
 	"proxycore/api/v6/internal/util"
 	sdkAuth "proxycore/api/v6/sdk/auth"
 	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
-	log "github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
 var lastRefreshKeys = []string{"last_refresh", "lastRefresh", "last_refreshed_at", "lastRefreshedAt"}
@@ -1019,6 +1020,11 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 	if record == nil {
 		return "", fmt.Errorf("token record is nil")
 	}
+	if info := coreauth.GetRequestInfo(ctx); info != nil {
+		if proxyURL := strings.TrimSpace(info.Query.Get("proxy_url")); proxyURL != "" {
+			record.ProxyURL = proxyURL
+		}
+	}
 	store := h.tokenStoreWithBaseDir()
 	if store == nil {
 		return "", fmt.Errorf("token store unavailable")
@@ -1040,6 +1046,17 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 		}
 	}
 	return store.Save(ctx, record)
+}
+
+func (h *Handler) configWithRequestProxy(c *gin.Context) *config.Config {
+	if h == nil || h.cfg == nil {
+		return &config.Config{}
+	}
+	cfgCopy := *h.cfg
+	if proxyURL := strings.TrimSpace(c.Query("proxy_url")); proxyURL != "" {
+		cfgCopy.SDKConfig.ProxyURL = proxyURL
+	}
+	return &cfgCopy
 }
 
 func (h *Handler) RequestAnthropicToken(c *gin.Context) {
@@ -1065,7 +1082,7 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 	}
 
 	// Initialize Claude auth service
-	anthropicAuth := claude.NewClaudeAuth(h.cfg)
+	anthropicAuth := claude.NewClaudeAuth(h.configWithRequestProxy(c))
 
 	// Generate authorization URL (then override redirect_uri to reuse server port)
 	authURL, state, err := anthropicAuth.GenerateAuthURL(state, pkceCodes)
@@ -1190,7 +1207,8 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 	ctx := context.Background()
 	ctx = PopulateAuthContext(ctx, c)
-	proxyHTTPClient := util.SetProxy(&h.cfg.SDKConfig, &http.Client{})
+	cfg := h.configWithRequestProxy(c)
+	proxyHTTPClient := util.SetProxy(&cfg.SDKConfig, &http.Client{})
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, proxyHTTPClient)
 
 	// Optional project ID from query
@@ -1469,7 +1487,7 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 	}
 
 	// Initialize Codex auth service
-	openaiAuth := codex.NewCodexAuth(h.cfg)
+	openaiAuth := codex.NewCodexAuth(h.configWithRequestProxy(c))
 
 	// Generate authorization URL
 	authURL, err := openaiAuth.GenerateAuthURL(state, pkceCodes)
@@ -1598,7 +1616,7 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 
 	fmt.Println("Initializing Antigravity authentication...")
 
-	authSvc := antigravity.NewAntigravityAuth(h.cfg, nil)
+	authSvc := antigravity.NewAntigravityAuth(h.configWithRequestProxy(c), nil)
 
 	state, errState := misc.GenerateRandomState()
 	if errState != nil {
@@ -1765,7 +1783,7 @@ func (h *Handler) RequestQwenToken(c *gin.Context) {
 
 	state := fmt.Sprintf("gem-%d", time.Now().UnixNano())
 	// Initialize Qwen auth service
-	qwenAuth := qwen.NewQwenAuth(h.cfg)
+	qwenAuth := qwen.NewQwenAuth(h.configWithRequestProxy(c))
 
 	// Generate authorization URL
 	deviceFlow, err := qwenAuth.InitiateDeviceFlow(ctx)
@@ -1821,7 +1839,7 @@ func (h *Handler) RequestKimiToken(c *gin.Context) {
 
 	state := fmt.Sprintf("kmi-%d", time.Now().UnixNano())
 	// Initialize Kimi auth service
-	kimiAuth := kimi.NewKimiAuth(h.cfg)
+	kimiAuth := kimi.NewKimiAuth(h.configWithRequestProxy(c))
 
 	// Generate authorization URL
 	deviceFlow, errStartDeviceFlow := kimiAuth.StartDeviceFlow(ctx)
@@ -1897,7 +1915,7 @@ func (h *Handler) RequestIFlowToken(c *gin.Context) {
 	fmt.Println("Initializing iFlow authentication...")
 
 	state := fmt.Sprintf("ifl-%d", time.Now().UnixNano())
-	authSvc := iflowauth.NewIFlowAuth(h.cfg)
+	authSvc := iflowauth.NewIFlowAuth(h.configWithRequestProxy(c))
 	authURL, redirectURI := authSvc.AuthorizationURL(state, iflowauth.CallbackPort)
 
 	RegisterOAuthSession(state, "iflow")

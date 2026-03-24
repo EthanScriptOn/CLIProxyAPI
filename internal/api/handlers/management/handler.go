@@ -72,6 +72,10 @@ type DBAPIKeyStore interface {
 	SaveNode(ctx context.Context, r NodeRecord) error
 	RenameNode(ctx context.Context, oldNodeIP, newNodeIP string) error
 	DeleteNode(ctx context.Context, nodeIP string) error
+	ListProxies(ctx context.Context) ([]ProxyRecord, error)
+	SaveProxy(ctx context.Context, r ProxyRecord) error
+	UpdateProxy(ctx context.Context, oldName string, r ProxyRecord) error
+	DeleteProxy(ctx context.Context, name string) error
 	GetManagementPasswordHash(ctx context.Context) (string, error)
 	SetManagementPasswordHash(ctx context.Context, hash string) error
 	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)
