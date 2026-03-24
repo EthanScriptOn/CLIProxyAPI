@@ -114,6 +114,17 @@ func parseLastRefreshValue(v any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+func metadataValueAsString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case fmt.Stringer:
+		return t.String()
+	default:
+		return ""
+	}
+}
+
 func isWebUIRequest(c *gin.Context) bool {
 	raw := strings.TrimSpace(c.Query("is_webui"))
 	if raw == "" {
@@ -556,6 +567,133 @@ func isRuntimeOnlyAuth(auth *coreauth.Auth) bool {
 	return strings.EqualFold(strings.TrimSpace(auth.Attributes["runtime_only"]), "true")
 }
 
+func (h *Handler) findAuthByNameOrID(ctx context.Context, name string) *coreauth.Auth {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	if h != nil && h.authManager != nil {
+		if auth, ok := h.authManager.GetByID(name); ok {
+			return auth
+		}
+		for _, auth := range h.authManager.List() {
+			if auth != nil && (auth.FileName == name || auth.ID == name) {
+				return auth
+			}
+		}
+	}
+	if h != nil && h.pgStore != nil {
+		auths, err := h.pgStore.ListAllAuth(ctx)
+		if err != nil {
+			return nil
+		}
+		for _, auth := range auths {
+			if auth != nil && (auth.FileName == name || auth.ID == name) {
+				return auth
+			}
+		}
+	}
+	return nil
+}
+
+func buildRuntimeOnlyAuthFromJSON(name string, data []byte) (*coreauth.Auth, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("auth payload is empty")
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("invalid auth file: %w", err)
+	}
+	name = strings.TrimSpace(filepath.Base(name))
+	if name == "" {
+		return nil, fmt.Errorf("auth file name is required")
+	}
+	provider := strings.TrimSpace(metadataValueAsString(metadata["type"]))
+	if provider == "" {
+		provider = "unknown"
+	}
+	attr := map[string]string{"runtime_only": "true"}
+	if email := strings.TrimSpace(metadataValueAsString(metadata["email"])); email != "" {
+		attr["email"] = email
+	}
+	label := provider
+	if email := strings.TrimSpace(metadataValueAsString(metadata["email"])); email != "" {
+		label = email
+	}
+	lastRefresh, hasLastRefresh := extractLastRefreshTimestamp(metadata)
+	auth := &coreauth.Auth{
+		ID:         name,
+		Provider:   provider,
+		FileName:   name,
+		Label:      label,
+		Status:     coreauth.StatusActive,
+		Attributes: attr,
+		Metadata:   metadata,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	if hasLastRefresh {
+		auth.LastRefreshedAt = lastRefresh
+	}
+	return auth, nil
+}
+
+func (h *Handler) registerRuntimeOnlyAuth(ctx context.Context, auth *coreauth.Auth) error {
+	if h == nil || h.authManager == nil || auth == nil {
+		return nil
+	}
+	if existing, ok := h.authManager.GetByID(auth.ID); ok {
+		auth.CreatedAt = existing.CreatedAt
+		if auth.LastRefreshedAt.IsZero() {
+			auth.LastRefreshedAt = existing.LastRefreshedAt
+		}
+		auth.NextRefreshAfter = existing.NextRefreshAfter
+		auth.NextRetryAfter = existing.NextRetryAfter
+		auth.Runtime = existing.Runtime
+		auth.ModelStates = existing.ModelStates
+		auth.Unavailable = existing.Unavailable
+		auth.Status = existing.Status
+		auth.StatusMessage = existing.StatusMessage
+		auth.Disabled = existing.Disabled
+		_, err := h.authManager.Update(ctx, auth)
+		return err
+	}
+	_, err := h.authManager.Register(ctx, auth)
+	return err
+}
+
+func (h *Handler) findDuplicateIFlowBXAuth(ctx context.Context, bxAuth string) string {
+	bxAuth = strings.TrimSpace(bxAuth)
+	if bxAuth == "" {
+		return ""
+	}
+	var auths []*coreauth.Auth
+	if h != nil && h.authManager != nil {
+		auths = h.authManager.List()
+	} else if h != nil && h.pgStore != nil {
+		list, err := h.pgStore.ListAllAuth(ctx)
+		if err == nil {
+			auths = list
+		}
+	}
+	for _, auth := range auths {
+		if auth == nil || !strings.EqualFold(strings.TrimSpace(auth.Provider), "iflow") || auth.Metadata == nil {
+			continue
+		}
+		cookie := strings.TrimSpace(metadataValueAsString(auth.Metadata["cookie"]))
+		if cookie == "" {
+			continue
+		}
+		if iflowauth.ExtractBXAuth(cookie) == bxAuth {
+			if strings.TrimSpace(auth.FileName) != "" {
+				return auth.FileName
+			}
+			return auth.ID
+		}
+	}
+	return ""
+}
+
 // Download single auth file by name
 func (h *Handler) DownloadAuthFile(c *gin.Context) {
 	name := c.Query("name")
@@ -565,6 +703,21 @@ func (h *Handler) DownloadAuthFile(c *gin.Context) {
 	}
 	if !strings.HasSuffix(strings.ToLower(name), ".json") {
 		c.JSON(400, gin.H{"error": "name must end with .json"})
+		return
+	}
+	if h.pgStore != nil {
+		auth := h.findAuthByNameOrID(c.Request.Context(), name)
+		if auth == nil {
+			c.JSON(404, gin.H{"error": "file not found"})
+			return
+		}
+		data, err := json.Marshal(auth.Metadata)
+		if err != nil {
+			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to serialize auth: %v", err)})
+			return
+		}
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(name)))
+		c.Data(200, "application/json", data)
 		return
 	}
 	full := filepath.Join(h.cfg.AuthDir, name)
@@ -588,6 +741,62 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	if h.pgStore != nil {
+		var (
+			name string
+			data []byte
+			err  error
+		)
+		if file, errForm := c.FormFile("file"); errForm == nil && file != nil {
+			name = filepath.Base(file.Filename)
+			if !strings.HasSuffix(strings.ToLower(name), ".json") {
+				c.JSON(400, gin.H{"error": "file must be .json"})
+				return
+			}
+			src, errOpen := file.Open()
+			if errOpen != nil {
+				c.JSON(500, gin.H{"error": fmt.Sprintf("failed to open uploaded file: %v", errOpen)})
+				return
+			}
+			defer src.Close()
+			data, err = io.ReadAll(src)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "failed to read uploaded file"})
+				return
+			}
+		} else {
+			name = c.Query("name")
+			if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+				c.JSON(400, gin.H{"error": "invalid name"})
+				return
+			}
+			if !strings.HasSuffix(strings.ToLower(name), ".json") {
+				c.JSON(400, gin.H{"error": "name must end with .json"})
+				return
+			}
+			data, err = io.ReadAll(c.Request.Body)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "failed to read body"})
+				return
+			}
+		}
+		record, errBuild := buildRuntimeOnlyAuthFromJSON(name, data)
+		if errBuild != nil {
+			c.JSON(400, gin.H{"error": errBuild.Error()})
+			return
+		}
+		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		if errSave != nil {
+			c.JSON(500, gin.H{"error": errSave.Error()})
+			return
+		}
+		if errReg := h.registerRuntimeOnlyAuth(ctx, record); errReg != nil {
+			c.JSON(500, gin.H{"error": errReg.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "ok", "saved_path": savedPath})
+		return
+	}
 	if file, err := c.FormFile("file"); err == nil && file != nil {
 		name := filepath.Base(file.Filename)
 		if !strings.HasSuffix(strings.ToLower(name), ".json") {
@@ -1116,32 +1325,9 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 			defer stopCallbackForwarderInstance(anthropicCallbackPort, forwarder)
 		}
 
-		// Helper: wait for callback file
-		waitFile := filepath.Join(h.cfg.AuthDir, fmt.Sprintf(".oauth-anthropic-%s.oauth", state))
-		waitForFile := func(path string, timeout time.Duration) (map[string]string, error) {
-			deadline := time.Now().Add(timeout)
-			for {
-				if !IsOAuthSessionPending(state, "anthropic") {
-					return nil, errOAuthSessionNotPending
-				}
-				if time.Now().After(deadline) {
-					SetOAuthSessionError(state, "Timeout waiting for OAuth callback")
-					return nil, fmt.Errorf("timeout waiting for OAuth callback")
-				}
-				data, errRead := os.ReadFile(path)
-				if errRead == nil {
-					var m map[string]string
-					_ = json.Unmarshal(data, &m)
-					_ = os.Remove(path)
-					return m, nil
-				}
-				time.Sleep(500 * time.Millisecond)
-			}
-		}
-
 		fmt.Println("Waiting for authentication callback...")
 		// Wait up to 5 minutes
-		resultMap, errWait := waitForFile(waitFile, 5*time.Minute)
+		resultMap, errWait := h.waitForOAuthCallback(ctx, "anthropic", state, 5*time.Minute)
 		if errWait != nil {
 			if errors.Is(errWait, errOAuthSessionNotPending) {
 				return
@@ -1253,38 +1439,27 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 			defer stopCallbackForwarderInstance(geminiCallbackPort, forwarder)
 		}
 
-		// Wait for callback file written by server route
-		waitFile := filepath.Join(h.cfg.AuthDir, fmt.Sprintf(".oauth-gemini-%s.oauth", state))
 		fmt.Println("Waiting for authentication callback...")
-		deadline := time.Now().Add(5 * time.Minute)
 		var authCode string
-		for {
-			if !IsOAuthSessionPending(state, "gemini") {
+		resultMap, errWait := h.waitForOAuthCallback(ctx, "gemini", state, 5*time.Minute)
+		if errWait != nil {
+			if errors.Is(errWait, errOAuthSessionNotPending) {
 				return
 			}
-			if time.Now().After(deadline) {
-				log.Error("oauth flow timed out")
-				SetOAuthSessionError(state, "OAuth flow timed out")
-				return
-			}
-			if data, errR := os.ReadFile(waitFile); errR == nil {
-				var m map[string]string
-				_ = json.Unmarshal(data, &m)
-				_ = os.Remove(waitFile)
-				if errStr := m["error"]; errStr != "" {
-					log.Errorf("Authentication failed: %s", errStr)
-					SetOAuthSessionError(state, "Authentication failed")
-					return
-				}
-				authCode = m["code"]
-				if authCode == "" {
-					log.Errorf("Authentication failed: code not found")
-					SetOAuthSessionError(state, "Authentication failed: code not found")
-					return
-				}
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
+			log.Error("oauth flow timed out")
+			SetOAuthSessionError(state, "OAuth flow timed out")
+			return
+		}
+		if errStr := resultMap["error"]; errStr != "" {
+			log.Errorf("Authentication failed: %s", errStr)
+			SetOAuthSessionError(state, "Authentication failed")
+			return
+		}
+		authCode = resultMap["code"]
+		if authCode == "" {
+			log.Errorf("Authentication failed: code not found")
+			SetOAuthSessionError(state, "Authentication failed: code not found")
+			return
 		}
 
 		// Exchange authorization code for token
@@ -1521,41 +1696,30 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 			defer stopCallbackForwarderInstance(codexCallbackPort, forwarder)
 		}
 
-		// Wait for callback file
-		waitFile := filepath.Join(h.cfg.AuthDir, fmt.Sprintf(".oauth-codex-%s.oauth", state))
-		deadline := time.Now().Add(5 * time.Minute)
 		var code string
-		for {
-			if !IsOAuthSessionPending(state, "codex") {
+		resultMap, errWait := h.waitForOAuthCallback(ctx, "codex", state, 5*time.Minute)
+		if errWait != nil {
+			if errors.Is(errWait, errOAuthSessionNotPending) {
 				return
 			}
-			if time.Now().After(deadline) {
-				authErr := codex.NewAuthenticationError(codex.ErrCallbackTimeout, fmt.Errorf("timeout waiting for OAuth callback"))
-				log.Error(codex.GetUserFriendlyMessage(authErr))
-				SetOAuthSessionError(state, "Timeout waiting for OAuth callback")
-				return
-			}
-			if data, errR := os.ReadFile(waitFile); errR == nil {
-				var m map[string]string
-				_ = json.Unmarshal(data, &m)
-				_ = os.Remove(waitFile)
-				if errStr := m["error"]; errStr != "" {
-					oauthErr := codex.NewOAuthError(errStr, "", http.StatusBadRequest)
-					log.Error(codex.GetUserFriendlyMessage(oauthErr))
-					SetOAuthSessionError(state, "Bad Request")
-					return
-				}
-				if m["state"] != state {
-					authErr := codex.NewAuthenticationError(codex.ErrInvalidState, fmt.Errorf("expected %s, got %s", state, m["state"]))
-					SetOAuthSessionError(state, "State code error")
-					log.Error(codex.GetUserFriendlyMessage(authErr))
-					return
-				}
-				code = m["code"]
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
+			authErr := codex.NewAuthenticationError(codex.ErrCallbackTimeout, fmt.Errorf("timeout waiting for OAuth callback"))
+			log.Error(codex.GetUserFriendlyMessage(authErr))
+			SetOAuthSessionError(state, "Timeout waiting for OAuth callback")
+			return
 		}
+		if errStr := resultMap["error"]; errStr != "" {
+			oauthErr := codex.NewOAuthError(errStr, "", http.StatusBadRequest)
+			log.Error(codex.GetUserFriendlyMessage(oauthErr))
+			SetOAuthSessionError(state, "Bad Request")
+			return
+		}
+		if resultMap["state"] != state {
+			authErr := codex.NewAuthenticationError(codex.ErrInvalidState, fmt.Errorf("expected %s, got %s", state, resultMap["state"]))
+			SetOAuthSessionError(state, "State code error")
+			log.Error(codex.GetUserFriendlyMessage(authErr))
+			return
+		}
+		code = resultMap["code"]
 
 		log.Debug("Authorization code received, exchanging for tokens...")
 		// Exchange code for tokens using internal auth service
@@ -1652,41 +1816,31 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 			defer stopCallbackForwarderInstance(antigravity.CallbackPort, forwarder)
 		}
 
-		waitFile := filepath.Join(h.cfg.AuthDir, fmt.Sprintf(".oauth-antigravity-%s.oauth", state))
-		deadline := time.Now().Add(5 * time.Minute)
 		var authCode string
-		for {
-			if !IsOAuthSessionPending(state, "antigravity") {
+		resultMap, errWait := h.waitForOAuthCallback(ctx, "antigravity", state, 5*time.Minute)
+		if errWait != nil {
+			if errors.Is(errWait, errOAuthSessionNotPending) {
 				return
 			}
-			if time.Now().After(deadline) {
-				log.Error("oauth flow timed out")
-				SetOAuthSessionError(state, "OAuth flow timed out")
-				return
-			}
-			if data, errReadFile := os.ReadFile(waitFile); errReadFile == nil {
-				var payload map[string]string
-				_ = json.Unmarshal(data, &payload)
-				_ = os.Remove(waitFile)
-				if errStr := strings.TrimSpace(payload["error"]); errStr != "" {
-					log.Errorf("Authentication failed: %s", errStr)
-					SetOAuthSessionError(state, "Authentication failed")
-					return
-				}
-				if payloadState := strings.TrimSpace(payload["state"]); payloadState != "" && payloadState != state {
-					log.Errorf("Authentication failed: state mismatch")
-					SetOAuthSessionError(state, "Authentication failed: state mismatch")
-					return
-				}
-				authCode = strings.TrimSpace(payload["code"])
-				if authCode == "" {
-					log.Error("Authentication failed: code not found")
-					SetOAuthSessionError(state, "Authentication failed: code not found")
-					return
-				}
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
+			log.Error("oauth flow timed out")
+			SetOAuthSessionError(state, "OAuth flow timed out")
+			return
+		}
+		if errStr := strings.TrimSpace(resultMap["error"]); errStr != "" {
+			log.Errorf("Authentication failed: %s", errStr)
+			SetOAuthSessionError(state, "Authentication failed")
+			return
+		}
+		if payloadState := strings.TrimSpace(resultMap["state"]); payloadState != "" && payloadState != state {
+			log.Errorf("Authentication failed: state mismatch")
+			SetOAuthSessionError(state, "Authentication failed: state mismatch")
+			return
+		}
+		authCode = strings.TrimSpace(resultMap["code"])
+		if authCode == "" {
+			log.Error("Authentication failed: code not found")
+			SetOAuthSessionError(state, "Authentication failed: code not found")
+			return
 		}
 
 		tokenResp, errToken := authSvc.ExchangeCodeForTokens(ctx, authCode, redirectURI)
@@ -1943,24 +2097,14 @@ func (h *Handler) RequestIFlowToken(c *gin.Context) {
 		}
 		fmt.Println("Waiting for authentication...")
 
-		waitFile := filepath.Join(h.cfg.AuthDir, fmt.Sprintf(".oauth-iflow-%s.oauth", state))
-		deadline := time.Now().Add(5 * time.Minute)
-		var resultMap map[string]string
-		for {
-			if !IsOAuthSessionPending(state, "iflow") {
+		resultMap, errWait := h.waitForOAuthCallback(ctx, "iflow", state, 5*time.Minute)
+		if errWait != nil {
+			if errors.Is(errWait, errOAuthSessionNotPending) {
 				return
 			}
-			if time.Now().After(deadline) {
-				SetOAuthSessionError(state, "Authentication failed")
-				fmt.Println("Authentication failed: timeout waiting for callback")
-				return
-			}
-			if data, errR := os.ReadFile(waitFile); errR == nil {
-				_ = os.Remove(waitFile)
-				_ = json.Unmarshal(data, &resultMap)
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
+			SetOAuthSessionError(state, "Authentication failed")
+			fmt.Println("Authentication failed: timeout waiting for callback")
+			return
 		}
 
 		if errStr := strings.TrimSpace(resultMap["error"]); errStr != "" {
@@ -2048,7 +2192,13 @@ func (h *Handler) RequestIFlowCookieToken(c *gin.Context) {
 
 	// Check for duplicate BXAuth before authentication
 	bxAuth := iflowauth.ExtractBXAuth(cookieValue)
-	if existingFile, err := iflowauth.CheckDuplicateBXAuth(h.cfg.AuthDir, bxAuth); err != nil {
+	if h.pgStore != nil {
+		if existingFile := h.findDuplicateIFlowBXAuth(ctx, bxAuth); existingFile != "" {
+			existingFileName := filepath.Base(existingFile)
+			c.JSON(http.StatusConflict, gin.H{"status": "error", "error": "duplicate BXAuth found", "existing_file": existingFileName})
+			return
+		}
+	} else if existingFile, err := iflowauth.CheckDuplicateBXAuth(h.cfg.AuthDir, bxAuth); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "failed to check duplicate"})
 		return
 	} else if existingFile != "" {

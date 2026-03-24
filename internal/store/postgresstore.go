@@ -22,13 +22,14 @@ import (
 )
 
 const (
-	defaultConfigTable  = "config_store"
-	defaultAuthTable    = "auth_store"
-	defaultConfigKey    = "config"
-	defaultAPIKeysTable = "api_keys"
-	defaultUsageTable   = "usage_records"
-	defaultNodesTable   = "nodes"
-	defaultProxiesTable = "proxies"
+	defaultConfigTable        = "config_store"
+	defaultAuthTable          = "auth_store"
+	defaultConfigKey          = "config"
+	defaultAPIKeysTable       = "api_keys"
+	defaultUsageTable         = "usage_records"
+	defaultNodesTable         = "nodes"
+	defaultProxiesTable       = "proxies"
+	defaultOAuthCallbackTable = "oauth_callbacks"
 )
 
 // PostgresStoreConfig captures configuration required to initialize a Postgres-backed store.
@@ -54,6 +55,14 @@ type authCooldownState struct {
 type authDirtyItem struct {
 	id       string
 	cooldown authCooldownState
+}
+
+type OAuthCallbackRecord struct {
+	Provider  string
+	State     string
+	Code      string
+	Error     string
+	CreatedAt time.Time
 }
 
 // PostgresStore persists configuration and authentication metadata using PostgreSQL as backend.
@@ -265,6 +274,24 @@ func (s *PostgresStore) EnsureSchema(ctx context.Context) error {
 	`, proxiesTable)); err != nil {
 		return fmt.Errorf("postgres store: create proxies table: %w", err)
 	}
+
+	oauthCallbackTable := s.fullTableName(defaultOAuthCallbackTable)
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			provider TEXT NOT NULL,
+			state TEXT NOT NULL,
+			code TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (provider, state)
+		)
+	`, oauthCallbackTable)); err != nil {
+		return fmt.Errorf("postgres store: create oauth callbacks table: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_oauth_callbacks_created_at ON %s (created_at)`,
+		oauthCallbackTable,
+	))
 
 	return nil
 }
@@ -1173,6 +1200,68 @@ func (s *PostgresStore) DeleteProxy(ctx context.Context, name string) error {
 		return fmt.Errorf("postgres store: name is required")
 	}
 	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE name = $1`, s.fullTableName(defaultProxiesTable)), name)
+	return err
+}
+
+func (s *PostgresStore) SaveOAuthCallback(ctx context.Context, r OAuthCallbackRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	provider := strings.TrimSpace(r.Provider)
+	state := strings.TrimSpace(r.State)
+	if provider == "" || state == "" {
+		return fmt.Errorf("postgres store: provider and state are required")
+	}
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO %s (provider, state, code, error, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (provider, state) DO UPDATE
+		SET code = EXCLUDED.code,
+		    error = EXCLUDED.error,
+		    created_at = NOW()
+	`, s.fullTableName(defaultOAuthCallbackTable)), provider, state, strings.TrimSpace(r.Code), strings.TrimSpace(r.Error))
+	return err
+}
+
+func (s *PostgresStore) GetOAuthCallback(ctx context.Context, provider, state string) (*OAuthCallbackRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("postgres store: not initialized")
+	}
+	provider = strings.TrimSpace(provider)
+	state = strings.TrimSpace(state)
+	if provider == "" || state == "" {
+		return nil, fmt.Errorf("postgres store: provider and state are required")
+	}
+
+	row := s.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT provider, state, code, error, created_at
+		FROM %s
+		WHERE provider = $1 AND state = $2
+	`, s.fullTableName(defaultOAuthCallbackTable)), provider, state)
+
+	var rec OAuthCallbackRecord
+	if err := row.Scan(&rec.Provider, &rec.State, &rec.Code, &rec.Error, &rec.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func (s *PostgresStore) DeleteOAuthCallback(ctx context.Context, provider, state string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	provider = strings.TrimSpace(provider)
+	state = strings.TrimSpace(state)
+	if provider == "" || state == "" {
+		return fmt.Errorf("postgres store: provider and state are required")
+	}
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		DELETE FROM %s
+		WHERE provider = $1 AND state = $2
+	`, s.fullTableName(defaultOAuthCallbackTable)), provider, state)
 	return err
 }
 

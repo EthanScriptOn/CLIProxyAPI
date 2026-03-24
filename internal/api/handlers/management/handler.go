@@ -78,6 +78,9 @@ type DBAPIKeyStore interface {
 	DeleteProxy(ctx context.Context, name string) error
 	GetManagementPasswordHash(ctx context.Context) (string, error)
 	SetManagementPasswordHash(ctx context.Context, hash string) error
+	SaveOAuthCallback(ctx context.Context, payload OAuthCallbackPayload) error
+	GetOAuthCallback(ctx context.Context, provider, state string) (*OAuthCallbackPayload, error)
+	DeleteOAuthCallback(ctx context.Context, provider, state string) error
 	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)
 	ListAllAuth(ctx context.Context) ([]*coreauth.Auth, error)
 	DeleteAuth(ctx context.Context, id string) error

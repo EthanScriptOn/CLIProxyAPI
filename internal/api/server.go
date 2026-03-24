@@ -425,8 +425,8 @@ func (s *Server) setupRoutes() {
 		if errStr == "" {
 			errStr = c.Query("error_description")
 		}
-		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "anthropic", state, code, errStr)
+		if state != "" && s.mgmt != nil {
+			_ = s.mgmt.PersistOAuthCallback(c.Request.Context(), "anthropic", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -439,8 +439,8 @@ func (s *Server) setupRoutes() {
 		if errStr == "" {
 			errStr = c.Query("error_description")
 		}
-		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "codex", state, code, errStr)
+		if state != "" && s.mgmt != nil {
+			_ = s.mgmt.PersistOAuthCallback(c.Request.Context(), "codex", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -453,8 +453,8 @@ func (s *Server) setupRoutes() {
 		if errStr == "" {
 			errStr = c.Query("error_description")
 		}
-		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "gemini", state, code, errStr)
+		if state != "" && s.mgmt != nil {
+			_ = s.mgmt.PersistOAuthCallback(c.Request.Context(), "gemini", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -467,8 +467,8 @@ func (s *Server) setupRoutes() {
 		if errStr == "" {
 			errStr = c.Query("error_description")
 		}
-		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "iflow", state, code, errStr)
+		if state != "" && s.mgmt != nil {
+			_ = s.mgmt.PersistOAuthCallback(c.Request.Context(), "iflow", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
@@ -481,8 +481,8 @@ func (s *Server) setupRoutes() {
 		if errStr == "" {
 			errStr = c.Query("error_description")
 		}
-		if state != "" {
-			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, "antigravity", state, code, errStr)
+		if state != "" && s.mgmt != nil {
+			_ = s.mgmt.PersistOAuthCallback(c.Request.Context(), "antigravity", state, code, errStr)
 		}
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)

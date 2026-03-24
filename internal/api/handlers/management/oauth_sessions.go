@@ -242,6 +242,13 @@ type oauthCallbackFilePayload struct {
 	Error string `json:"error"`
 }
 
+type OAuthCallbackPayload struct {
+	Provider string `json:"provider"`
+	Code     string `json:"code"`
+	State    string `json:"state"`
+	Error    string `json:"error"`
+}
+
 func WriteOAuthCallbackFile(authDir, provider, state, code, errorMessage string) (string, error) {
 	if strings.TrimSpace(authDir) == "" {
 		return "", fmt.Errorf("auth dir is empty")

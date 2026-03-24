@@ -155,6 +155,32 @@ func (a *pgStoreAdapter) DeleteProxy(ctx context.Context, name string) error {
 	return a.s.DeleteProxy(ctx, name)
 }
 
+func (a *pgStoreAdapter) SaveOAuthCallback(ctx context.Context, payload management.OAuthCallbackPayload) error {
+	return a.s.SaveOAuthCallback(ctx, store.OAuthCallbackRecord{
+		Provider: payload.Provider,
+		State:    payload.State,
+		Code:     payload.Code,
+		Error:    payload.Error,
+	})
+}
+
+func (a *pgStoreAdapter) GetOAuthCallback(ctx context.Context, provider, state string) (*management.OAuthCallbackPayload, error) {
+	rec, err := a.s.GetOAuthCallback(ctx, provider, state)
+	if err != nil || rec == nil {
+		return nil, err
+	}
+	return &management.OAuthCallbackPayload{
+		Provider: rec.Provider,
+		State:    rec.State,
+		Code:     rec.Code,
+		Error:    rec.Error,
+	}, nil
+}
+
+func (a *pgStoreAdapter) DeleteOAuthCallback(ctx context.Context, provider, state string) error {
+	return a.s.DeleteOAuthCallback(ctx, provider, state)
+}
+
 func (a *pgStoreAdapter) ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error) {
 	return a.s.ListAuthByNode(ctx, nodeIP)
 }

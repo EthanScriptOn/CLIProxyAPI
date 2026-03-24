@@ -19,10 +19,6 @@ func (h *Handler) ImportVertexCredential(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config unavailable"})
 		return
 	}
-	if h.cfg.AuthDir == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "auth directory not configured"})
-		return
-	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
