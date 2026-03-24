@@ -310,6 +310,42 @@ func (h *Handler) validateManagementKey(ctx context.Context, clientIP, provided 
 	return authResult{OK: true}
 }
 
+func (h *Handler) validateDatabaseManagementKey(ctx context.Context, clientIP, provided string) authResult {
+	const (
+		maxFailures = 5
+		banDuration = 30 * time.Minute
+	)
+
+	if h == nil || h.pgStore == nil {
+		return authResult{StatusCode: http.StatusServiceUnavailable, Message: "database-backed login unavailable"}
+	}
+
+	if banned := h.checkBan(clientIP); banned.StatusCode != 0 {
+		return banned
+	}
+
+	if strings.TrimSpace(provided) == "" {
+		h.recordFailure(clientIP, maxFailures, banDuration)
+		return authResult{StatusCode: http.StatusUnauthorized, Message: "missing management key"}
+	}
+
+	dbHash, err := h.pgStore.GetManagementPasswordHash(ctx)
+	if err != nil {
+		return authResult{StatusCode: http.StatusInternalServerError, Message: "failed to load management password from database"}
+	}
+	if strings.TrimSpace(dbHash) == "" {
+		return authResult{StatusCode: http.StatusForbidden, Message: "database management key not set"}
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(dbHash), []byte(provided)) != nil {
+		h.recordFailure(clientIP, maxFailures, banDuration)
+		return authResult{StatusCode: http.StatusUnauthorized, Message: "invalid management key"}
+	}
+
+	h.clearFailure(clientIP)
+	return authResult{OK: true}
+}
+
 // Middleware enforces access control for management endpoints.
 // All requests (local and remote) require a valid management key.
 // Additionally, remote access requires allow-remote-management=true.

@@ -296,6 +296,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
+	s.engine.POST("/v0/management/login", s.managementLoginHandler())
 	s.mgmt.SetAccessManager(s.accessManager)
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
@@ -347,17 +348,10 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		optionState.routerConfigurator(engine, s.handlers, cfg)
 	}
 
-	// Register management routes when configuration or environment secrets are available,
-	// or when a local management password is provided (e.g. TUI mode).
-	hasManagementSecret := cfg.RemoteManagement.SecretKey != "" || envManagementSecret || s.localPassword != ""
-	if optionState.managementDBStore != nil {
-		// PG mode: management routes always available; password lives in DB.
-		hasManagementSecret = true
-	}
-	s.managementRoutesEnabled.Store(hasManagementSecret)
-	if hasManagementSecret {
-		s.registerManagementRoutes()
-	}
+	// Keep management routes always available. Individual handlers and middleware
+	// remain responsible for authentication/authorization.
+	s.managementRoutesEnabled.Store(true)
+	s.registerManagementRoutes()
 
 	if optionState.keepAliveEnabled {
 		s.enableKeepAlive(optionState.keepAliveTimeout, optionState.keepAliveOnTimeout)
@@ -544,8 +538,6 @@ func (s *Server) registerManagementRoutes() {
 
 	log.Info("management routes registered after secret key configuration")
 
-	s.engine.POST("/v0/management/login", s.managementAvailabilityMiddleware(), s.mgmt.Login)
-
 	mgmt := s.engine.Group("/v0/management")
 	mgmt.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
 	{
@@ -715,6 +707,16 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 
 		mgmt.POST("/change-secret-key", s.mgmt.ChangeSecretKey)
+	}
+}
+
+func (s *Server) managementLoginHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s == nil || s.mgmt == nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		s.mgmt.Login(c)
 	}
 }
 

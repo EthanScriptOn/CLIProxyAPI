@@ -43,8 +43,7 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	clientIP := c.ClientIP()
-	localClient := clientIP == "127.0.0.1" || clientIP == "::1"
-	result := h.validateManagementKey(c.Request.Context(), clientIP, strings.TrimSpace(body.ManagementKey), localClient)
+	result := h.validateDatabaseManagementKey(c.Request.Context(), clientIP, strings.TrimSpace(body.ManagementKey))
 	if !result.OK {
 		c.JSON(result.StatusCode, gin.H{"error": result.Message})
 		return

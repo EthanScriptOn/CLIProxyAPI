@@ -16,9 +16,9 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 	cliproxyauth "proxycore/api/v6/sdk/cliproxy/auth"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -43,9 +43,10 @@ type PostgresStoreConfig struct {
 // authCooldownState is stored in the cooldown_state JSONB column so that
 // cooldown/quota state survives service restarts.
 type authCooldownState struct {
-	NextRetryAfter time.Time                               `json:"next_retry_after,omitempty"`
-	Unavailable    bool                                    `json:"unavailable,omitempty"`
-	ModelStates    map[string]*cliproxyauth.ModelState     `json:"model_states,omitempty"`
+	NextRetryAfter time.Time                           `json:"next_retry_after,omitempty"`
+	Unavailable    bool                                `json:"unavailable,omitempty"`
+	StatusMessage  string                              `json:"status_message,omitempty"`
+	ModelStates    map[string]*cliproxyauth.ModelState `json:"model_states,omitempty"`
 }
 
 // authDirtyItem queues an async cooldown-state write.
@@ -480,11 +481,11 @@ func (s *PostgresStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) 
 	auths := make([]*cliproxyauth.Auth, 0, 32)
 	for rows.Next() {
 		var (
-			id            string
-			payload       string
-			cooldownJSON  []byte
-			createdAt     time.Time
-			updatedAt     time.Time
+			id           string
+			payload      string
+			cooldownJSON []byte
+			createdAt    time.Time
+			updatedAt    time.Time
 		)
 		if err = rows.Scan(&id, &payload, &cooldownJSON, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("postgres store: scan auth row: %w", err)
@@ -517,19 +518,7 @@ func (s *PostgresStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) 
 			NextRefreshAfter: time.Time{},
 		}
 
-		// Restore cooldown / quota state so the account isn't hammered right after restart.
-		if len(cooldownJSON) > 0 {
-			var cs authCooldownState
-			if jsonErr := json.Unmarshal(cooldownJSON, &cs); jsonErr == nil {
-				if cs.NextRetryAfter.After(now) {
-					auth.Unavailable = cs.Unavailable
-					auth.NextRetryAfter = cs.NextRetryAfter
-				}
-				if len(cs.ModelStates) > 0 && cs.NextRetryAfter.After(now) {
-					auth.ModelStates = cs.ModelStates
-				}
-			}
-		}
+		restoreCooldownState(auth, cooldownJSON, now)
 
 		auths = append(auths, auth)
 	}
@@ -592,7 +581,7 @@ func (s *PostgresStore) ListNodes(ctx context.Context) ([]string, error) {
 
 // ListAuthByNode enumerates all auth records for a specific node_ip.
 func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*cliproxyauth.Auth, error) {
-	query := fmt.Sprintf("SELECT id, content, created_at, updated_at FROM %s WHERE node_ip = $1 ORDER BY id", s.fullTableName(s.cfg.AuthTable))
+	query := fmt.Sprintf("SELECT id, content, cooldown_state, created_at, updated_at FROM %s WHERE node_ip = $1 ORDER BY id", s.fullTableName(s.cfg.AuthTable))
 	rows, err := s.db.QueryContext(ctx, query, nodeIP)
 	if err != nil {
 		return nil, fmt.Errorf("postgres store: list auth by node: %w", err)
@@ -600,14 +589,16 @@ func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*c
 	defer rows.Close()
 
 	auths := make([]*cliproxyauth.Auth, 0, 32)
+	now := time.Now()
 	for rows.Next() {
 		var (
-			id        string
-			payload   string
-			createdAt time.Time
-			updatedAt time.Time
+			id           string
+			payload      string
+			cooldownJSON []byte
+			createdAt    time.Time
+			updatedAt    time.Time
 		)
-		if err = rows.Scan(&id, &payload, &createdAt, &updatedAt); err != nil {
+		if err = rows.Scan(&id, &payload, &cooldownJSON, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("postgres store: scan auth row: %w", err)
 		}
 		metadata := make(map[string]any)
@@ -634,6 +625,7 @@ func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*c
 			CreatedAt:  createdAt,
 			UpdatedAt:  updatedAt,
 		}
+		restoreCooldownState(auth, cooldownJSON, now)
 		auths = append(auths, auth)
 	}
 	if err = rows.Err(); err != nil {
@@ -644,7 +636,7 @@ func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*c
 
 // ListAllAuth returns all auth records across all nodes.
 func (s *PostgresStore) ListAllAuth(ctx context.Context) ([]*cliproxyauth.Auth, error) {
-	query := fmt.Sprintf("SELECT id, content, created_at, updated_at FROM %s ORDER BY id", s.fullTableName(s.cfg.AuthTable))
+	query := fmt.Sprintf("SELECT id, content, cooldown_state, created_at, updated_at FROM %s ORDER BY id", s.fullTableName(s.cfg.AuthTable))
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("postgres store: list all auth: %w", err)
@@ -652,14 +644,16 @@ func (s *PostgresStore) ListAllAuth(ctx context.Context) ([]*cliproxyauth.Auth, 
 	defer rows.Close()
 
 	auths := make([]*cliproxyauth.Auth, 0, 32)
+	now := time.Now()
 	for rows.Next() {
 		var (
-			id        string
-			payload   string
-			createdAt time.Time
-			updatedAt time.Time
+			id           string
+			payload      string
+			cooldownJSON []byte
+			createdAt    time.Time
+			updatedAt    time.Time
 		)
-		if err = rows.Scan(&id, &payload, &createdAt, &updatedAt); err != nil {
+		if err = rows.Scan(&id, &payload, &cooldownJSON, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("postgres store: scan auth row: %w", err)
 		}
 		metadata := make(map[string]any)
@@ -686,6 +680,7 @@ func (s *PostgresStore) ListAllAuth(ctx context.Context) ([]*cliproxyauth.Auth, 
 			CreatedAt:  createdAt,
 			UpdatedAt:  updatedAt,
 		}
+		restoreCooldownState(auth, cooldownJSON, now)
 		auths = append(auths, auth)
 	}
 	if err = rows.Err(); err != nil {
@@ -835,12 +830,33 @@ func (s *PostgresStore) enqueueCooldown(id string, auth *cliproxyauth.Auth) {
 		cooldown: authCooldownState{
 			NextRetryAfter: auth.NextRetryAfter,
 			Unavailable:    auth.Unavailable,
+			StatusMessage:  strings.TrimSpace(auth.StatusMessage),
 			ModelStates:    auth.ModelStates,
 		},
 	}
 	select {
 	case s.authDirtyCh <- item:
 	default: // channel full – drop; next MarkResult will retry
+	}
+}
+
+func restoreCooldownState(auth *cliproxyauth.Auth, cooldownJSON []byte, now time.Time) {
+	if auth == nil || len(cooldownJSON) == 0 {
+		return
+	}
+	var cs authCooldownState
+	if err := json.Unmarshal(cooldownJSON, &cs); err != nil {
+		return
+	}
+	if cs.NextRetryAfter.After(now) {
+		auth.Unavailable = cs.Unavailable
+		auth.NextRetryAfter = cs.NextRetryAfter
+		if msg := strings.TrimSpace(cs.StatusMessage); msg != "" {
+			auth.StatusMessage = msg
+		}
+	}
+	if len(cs.ModelStates) > 0 && cs.NextRetryAfter.After(now) {
+		auth.ModelStates = cs.ModelStates
 	}
 }
 

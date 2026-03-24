@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"proxycore/api/v6/internal/api"
 	"proxycore/api/v6/internal/registry"
 	"proxycore/api/v6/internal/runtime/executor"
@@ -23,7 +24,6 @@ import (
 	coreauth "proxycore/api/v6/sdk/cliproxy/auth"
 	"proxycore/api/v6/sdk/cliproxy/usage"
 	"proxycore/api/v6/sdk/config"
-	log "github.com/sirupsen/logrus"
 )
 
 // Service wraps the proxy server lifecycle so external programs can embed the CLI proxy.
@@ -290,6 +290,9 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 		auth.CreatedAt = existing.CreatedAt
 		auth.LastRefreshedAt = existing.LastRefreshedAt
 		auth.NextRefreshAfter = existing.NextRefreshAfter
+		if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
+			auth.ModelStates = existing.ModelStates
+		}
 		op = "update"
 		_, err = s.coreManager.Update(ctx, auth)
 	} else {
@@ -309,6 +312,10 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 	// This operation may block on network calls, but the auth configuration
 	// is already effective at this point.
 	s.registerModelsForAuth(auth)
+
+	// Refresh the scheduler entry so the auth becomes immediately selectable
+	// with its current supported model set after model registration completes.
+	s.coreManager.RefreshSchedulerEntry(auth.ID)
 }
 
 func (s *Service) applyCoreAuthRemoval(ctx context.Context, id string) {
