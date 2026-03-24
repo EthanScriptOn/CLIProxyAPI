@@ -68,6 +68,10 @@ type DBAPIKeyStore interface {
 	DeleteAPIKey(ctx context.Context, key string) error
 	QueryUsageAggregate(ctx context.Context, params UsageAggregateParams) ([]UsageAggregateRow, error)
 	ListNodes(ctx context.Context) ([]string, error)
+	ListNodeRecords(ctx context.Context) ([]NodeRecord, error)
+	SaveNode(ctx context.Context, r NodeRecord) error
+	RenameNode(ctx context.Context, oldNodeIP, newNodeIP string) error
+	DeleteNode(ctx context.Context, nodeIP string) error
 	GetManagementPasswordHash(ctx context.Context) (string, error)
 	SetManagementPasswordHash(ctx context.Context, hash string) error
 	ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error)

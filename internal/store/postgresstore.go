@@ -579,6 +579,152 @@ func (s *PostgresStore) ListNodes(ctx context.Context) ([]string, error) {
 	return nodes, rows.Err()
 }
 
+// NodeRecord represents a row in the nodes table.
+type NodeRecord struct {
+	NodeIP       string
+	RegisteredAt time.Time
+	LastSeenAt   time.Time
+}
+
+// ListNodeRecords returns node registry entries with timestamps.
+func (s *PostgresStore) ListNodeRecords(ctx context.Context) ([]NodeRecord, error) {
+	query := fmt.Sprintf(
+		"SELECT node_ip, registered_at, last_seen_at FROM %s ORDER BY node_ip",
+		s.fullTableName(defaultNodesTable),
+	)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("postgres store: list node records: %w", err)
+	}
+	defer rows.Close()
+	var records []NodeRecord
+	for rows.Next() {
+		var r NodeRecord
+		if err = rows.Scan(&r.NodeIP, &r.RegisteredAt, &r.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("postgres store: scan node record: %w", err)
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
+// SaveNode inserts or updates a node registry entry.
+func (s *PostgresStore) SaveNode(ctx context.Context, r NodeRecord) error {
+	nodeIP := strings.TrimSpace(r.NodeIP)
+	if nodeIP == "" {
+		return fmt.Errorf("postgres store: node_ip is required")
+	}
+	registeredAt := r.RegisteredAt
+	if registeredAt.IsZero() {
+		registeredAt = time.Now().UTC()
+	}
+	lastSeenAt := r.LastSeenAt
+	if lastSeenAt.IsZero() {
+		lastSeenAt = registeredAt
+	}
+	query := fmt.Sprintf(`
+		INSERT INTO %s (node_ip, registered_at, last_seen_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (node_ip) DO UPDATE
+		SET registered_at = EXCLUDED.registered_at,
+		    last_seen_at = EXCLUDED.last_seen_at
+	`, s.fullTableName(defaultNodesTable))
+	if _, err := s.db.ExecContext(ctx, query, nodeIP, registeredAt, lastSeenAt); err != nil {
+		return fmt.Errorf("postgres store: save node: %w", err)
+	}
+	return nil
+}
+
+// RenameNode updates node_ip across node, auth, and usage tables.
+func (s *PostgresStore) RenameNode(ctx context.Context, oldNodeIP, newNodeIP string) error {
+	oldNodeIP = strings.TrimSpace(oldNodeIP)
+	newNodeIP = strings.TrimSpace(newNodeIP)
+	if oldNodeIP == "" || newNodeIP == "" {
+		return fmt.Errorf("postgres store: old and new node_ip are required")
+	}
+	if oldNodeIP == newNodeIP {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("postgres store: begin rename node tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	res, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET node_ip = $2 WHERE node_ip = $1`, s.fullTableName(defaultNodesTable)),
+		oldNodeIP, newNodeIP,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres store: rename node registry record: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("postgres store: read rename node result: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("postgres store: node not found")
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET node_ip = $2 WHERE node_ip = $1`, s.fullTableName(s.cfg.AuthTable)),
+		oldNodeIP, newNodeIP,
+	); err != nil {
+		return fmt.Errorf("postgres store: rename node auth records: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET node_ip = $2 WHERE node_ip = $1`, s.fullTableName(defaultUsageTable)),
+		oldNodeIP, newNodeIP,
+	); err != nil {
+		return fmt.Errorf("postgres store: rename node usage records: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("postgres store: commit rename node tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+// DeleteNode removes a node registry entry and all node-scoped auth/usage data.
+func (s *PostgresStore) DeleteNode(ctx context.Context, nodeIP string) error {
+	nodeIP = strings.TrimSpace(nodeIP)
+	if nodeIP == "" {
+		return fmt.Errorf("postgres store: node_ip is required")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("postgres store: begin delete node tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE node_ip = $1`, s.fullTableName(s.cfg.AuthTable)), nodeIP); err != nil {
+		return fmt.Errorf("postgres store: delete node auth records: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE node_ip = $1`, s.fullTableName(defaultUsageTable)), nodeIP); err != nil {
+		return fmt.Errorf("postgres store: delete node usage records: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE node_ip = $1`, s.fullTableName(defaultNodesTable)), nodeIP); err != nil {
+		return fmt.Errorf("postgres store: delete node registry record: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("postgres store: commit delete node tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
 // ListAuthByNode enumerates all auth records for a specific node_ip.
 func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*cliproxyauth.Auth, error) {
 	query := fmt.Sprintf("SELECT id, content, cooldown_state, created_at, updated_at FROM %s WHERE node_ip = $1 ORDER BY id", s.fullTableName(s.cfg.AuthTable))

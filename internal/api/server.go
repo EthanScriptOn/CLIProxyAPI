@@ -686,6 +686,10 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/auth-files", s.mgmt.ListAuthFiles)
 		mgmt.GET("/nodes", s.mgmt.GetNodes)
+		mgmt.GET("/nodes/records", s.mgmt.ListNodeRecords)
+		mgmt.POST("/nodes", s.mgmt.CreateNode)
+		mgmt.PATCH("/nodes", s.mgmt.RenameNode)
+		mgmt.DELETE("/nodes", s.mgmt.DeleteNode)
 		mgmt.GET("/auth-files/models", s.mgmt.GetAuthFileModels)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)

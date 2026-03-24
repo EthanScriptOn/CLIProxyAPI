@@ -43,6 +43,12 @@ type UsageAggregateRow struct {
 	FailedCount  int64  `json:"failed_count"`
 }
 
+type NodeRecord struct {
+	NodeIP       string    `json:"node_ip"`
+	RegisteredAt time.Time `json:"registered_at"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+}
+
 // SetPGStore injects the database store into the management handler.
 func (h *Handler) SetPGStore(s DBAPIKeyStore) {
 	if h == nil {

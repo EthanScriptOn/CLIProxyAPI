@@ -82,6 +82,38 @@ func (a *pgStoreAdapter) ListNodes(ctx context.Context) ([]string, error) {
 	return a.s.ListNodes(ctx)
 }
 
+func (a *pgStoreAdapter) ListNodeRecords(ctx context.Context) ([]management.NodeRecord, error) {
+	raw, err := a.s.ListNodeRecords(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]management.NodeRecord, len(raw))
+	for i, r := range raw {
+		out[i] = management.NodeRecord{
+			NodeIP:       r.NodeIP,
+			RegisteredAt: r.RegisteredAt,
+			LastSeenAt:   r.LastSeenAt,
+		}
+	}
+	return out, nil
+}
+
+func (a *pgStoreAdapter) SaveNode(ctx context.Context, r management.NodeRecord) error {
+	return a.s.SaveNode(ctx, store.NodeRecord{
+		NodeIP:       r.NodeIP,
+		RegisteredAt: r.RegisteredAt,
+		LastSeenAt:   r.LastSeenAt,
+	})
+}
+
+func (a *pgStoreAdapter) RenameNode(ctx context.Context, oldNodeIP, newNodeIP string) error {
+	return a.s.RenameNode(ctx, oldNodeIP, newNodeIP)
+}
+
+func (a *pgStoreAdapter) DeleteNode(ctx context.Context, nodeIP string) error {
+	return a.s.DeleteNode(ctx, nodeIP)
+}
+
 func (a *pgStoreAdapter) ListAuthByNode(ctx context.Context, nodeIP string) ([]*coreauth.Auth, error) {
 	return a.s.ListAuthByNode(ctx, nodeIP)
 }
@@ -136,4 +168,3 @@ func (a *pgStoreAdapter) GetManagementPasswordHash(ctx context.Context) (string,
 func (a *pgStoreAdapter) SetManagementPasswordHash(ctx context.Context, hash string) error {
 	return a.s.SetManagementPasswordHash(ctx, hash)
 }
-
