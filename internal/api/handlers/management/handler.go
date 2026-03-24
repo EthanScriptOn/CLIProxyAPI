@@ -139,6 +139,9 @@ func NewHandlerWithoutConfigFilePath(cfg *config.Config, manager *coreauth.Manag
 // SetConfig updates the in-memory config reference when the server hot-reloads.
 func (h *Handler) SetConfig(cfg *config.Config) { h.cfg = cfg }
 
+// HasDBStore reports whether management authentication/persistence is backed by Postgres.
+func (h *Handler) HasDBStore() bool { return h != nil && h.pgStore != nil }
+
 // SetAuthManager updates the auth manager reference used by management endpoints.
 func (h *Handler) SetAuthManager(manager *coreauth.Manager) { h.authManager = manager }
 

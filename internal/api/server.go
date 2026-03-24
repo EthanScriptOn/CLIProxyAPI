@@ -720,6 +720,22 @@ func (s *Server) managementLoginHandler() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) shouldEnableManagementRoutes(cfg *config.Config) bool {
+	if s == nil {
+		return false
+	}
+	if s.envManagementSecret {
+		return true
+	}
+	if s.mgmt != nil && s.mgmt.HasDBStore() {
+		return true
+	}
+	if cfg == nil {
+		return false
+	}
+	return strings.TrimSpace(cfg.RemoteManagement.SecretKey) != ""
+}
+
 func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !s.managementRoutesEnabled.Load() {
@@ -1057,35 +1073,36 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		util.SetLogLevel(cfg)
 	}
 
-	prevSecretEmpty := true
-	if oldCfg != nil {
-		prevSecretEmpty = oldCfg.RemoteManagement.SecretKey == ""
-	}
-	newSecretEmpty := cfg.RemoteManagement.SecretKey == ""
-	if s.envManagementSecret {
+	prevEnabled := s.shouldEnableManagementRoutes(oldCfg)
+	newEnabled := s.shouldEnableManagementRoutes(cfg)
+	if s.envManagementSecret || (s.mgmt != nil && s.mgmt.HasDBStore()) {
 		s.registerManagementRoutes()
 		if s.managementRoutesEnabled.CompareAndSwap(false, true) {
-			log.Info("management routes enabled via MANAGEMENT_PASSWORD")
+			if s.envManagementSecret {
+				log.Info("management routes enabled via MANAGEMENT_PASSWORD")
+			} else {
+				log.Info("management routes enabled via database-backed management password")
+			}
 		} else {
 			s.managementRoutesEnabled.Store(true)
 		}
 	} else {
 		switch {
-		case prevSecretEmpty && !newSecretEmpty:
+		case !prevEnabled && newEnabled:
 			s.registerManagementRoutes()
 			if s.managementRoutesEnabled.CompareAndSwap(false, true) {
 				log.Info("management routes enabled after secret key update")
 			} else {
 				s.managementRoutesEnabled.Store(true)
 			}
-		case !prevSecretEmpty && newSecretEmpty:
+		case prevEnabled && !newEnabled:
 			if s.managementRoutesEnabled.CompareAndSwap(true, false) {
 				log.Info("management routes disabled after secret key removal")
 			} else {
 				s.managementRoutesEnabled.Store(false)
 			}
 		default:
-			s.managementRoutesEnabled.Store(!newSecretEmpty)
+			s.managementRoutesEnabled.Store(newEnabled)
 		}
 	}
 
