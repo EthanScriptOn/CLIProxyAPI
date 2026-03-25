@@ -85,6 +85,40 @@ type PostgresStore struct {
 	contentHashes sync.Map // map[string]string: recID → hex(sha256)
 }
 
+func persistedAuthMetadata(auth *cliproxyauth.Auth) map[string]any {
+	if auth == nil {
+		return nil
+	}
+	meta := make(map[string]any, len(auth.Metadata)+3)
+	for key, value := range auth.Metadata {
+		meta[key] = value
+	}
+	meta["disabled"] = auth.Disabled
+	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
+		meta["prefix"] = prefix
+	} else {
+		delete(meta, "prefix")
+	}
+	if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
+		meta["proxy_url"] = proxyURL
+	} else {
+		delete(meta, "proxy_url")
+	}
+	return meta
+}
+
+func disabledFromMetadata(metadata map[string]any) bool {
+	disabled, _ := metadata["disabled"].(bool)
+	return disabled
+}
+
+func statusFromDisabled(metadata map[string]any) cliproxyauth.Status {
+	if disabledFromMetadata(metadata) {
+		return cliproxyauth.StatusDisabled
+	}
+	return cliproxyauth.StatusActive
+}
+
 // NewPostgresStore establishes a connection to PostgreSQL.
 func NewPostgresStore(ctx context.Context, cfg PostgresStoreConfig) (*PostgresStore, error) {
 	trimmedDSN := strings.TrimSpace(cfg.DSN)
@@ -464,6 +498,12 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 	var err error
 	switch {
 	case auth.Storage != nil:
+		type metadataSetter interface {
+			SetMetadata(map[string]any)
+		}
+		if setter, ok := auth.Storage.(metadataSetter); ok {
+			setter.SetMetadata(persistedAuthMetadata(auth))
+		}
 		// Use a temp file to serialize the token storage, then read it back.
 		tmp, errTmp := os.CreateTemp("", "pgstore-auth-*.json")
 		if errTmp != nil {
@@ -480,6 +520,7 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 			return "", fmt.Errorf("postgres store: read serialized token: %w", err)
 		}
 	case auth.Metadata != nil:
+		auth.Metadata = persistedAuthMetadata(auth)
 		raw, err = json.Marshal(auth.Metadata)
 		if err != nil {
 			return "", fmt.Errorf("postgres store: marshal metadata: %w", err)
@@ -546,12 +587,16 @@ func (s *PostgresStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error) 
 		if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 			attr["email"] = email
 		}
+		disabled := disabledFromMetadata(metadata)
 		auth := &cliproxyauth.Auth{
 			ID:               normalizeAuthID(id),
 			Provider:         provider,
 			FileName:         normalizeAuthID(id),
 			Label:            labelFor(metadata),
-			Status:           cliproxyauth.StatusActive,
+			Status:           statusFromDisabled(metadata),
+			Disabled:         disabled,
+			Prefix:           strings.TrimSpace(valueAsString(metadata["prefix"])),
+			ProxyURL:         strings.TrimSpace(valueAsString(metadata["proxy_url"])),
 			Attributes:       attr,
 			Metadata:         metadata,
 			CreatedAt:        createdAt,
@@ -811,12 +856,16 @@ func (s *PostgresStore) ListAuthByNode(ctx context.Context, nodeIP string) ([]*c
 		if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 			attr["email"] = email
 		}
+		disabled := disabledFromMetadata(metadata)
 		auth := &cliproxyauth.Auth{
 			ID:         normalizeAuthID(id),
 			Provider:   provider,
 			FileName:   normalizeAuthID(id),
 			Label:      labelFor(metadata),
-			Status:     cliproxyauth.StatusActive,
+			Status:     statusFromDisabled(metadata),
+			Disabled:   disabled,
+			Prefix:     strings.TrimSpace(valueAsString(metadata["prefix"])),
+			ProxyURL:   strings.TrimSpace(valueAsString(metadata["proxy_url"])),
 			Attributes: attr,
 			Metadata:   metadata,
 			CreatedAt:  createdAt,
@@ -866,12 +915,16 @@ func (s *PostgresStore) ListAllAuth(ctx context.Context) ([]*cliproxyauth.Auth, 
 		if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 			attr["email"] = email
 		}
+		disabled := disabledFromMetadata(metadata)
 		auth := &cliproxyauth.Auth{
 			ID:         normalizeAuthID(id),
 			Provider:   provider,
 			FileName:   normalizeAuthID(id),
 			Label:      labelFor(metadata),
-			Status:     cliproxyauth.StatusActive,
+			Status:     statusFromDisabled(metadata),
+			Disabled:   disabled,
+			Prefix:     strings.TrimSpace(valueAsString(metadata["prefix"])),
+			ProxyURL:   strings.TrimSpace(valueAsString(metadata["proxy_url"])),
 			Attributes: attr,
 			Metadata:   metadata,
 			CreatedAt:  createdAt,
@@ -982,6 +1035,12 @@ func (s *PostgresStore) SaveForNode(ctx context.Context, auth *cliproxyauth.Auth
 	var err error
 	switch {
 	case auth.Storage != nil:
+		type metadataSetter interface {
+			SetMetadata(map[string]any)
+		}
+		if setter, ok := auth.Storage.(metadataSetter); ok {
+			setter.SetMetadata(persistedAuthMetadata(auth))
+		}
 		tmp, errTmp := os.CreateTemp("", "pgstore-auth-*.json")
 		if errTmp != nil {
 			return "", fmt.Errorf("postgres store: create temp file: %w", errTmp)
@@ -997,6 +1056,7 @@ func (s *PostgresStore) SaveForNode(ctx context.Context, auth *cliproxyauth.Auth
 			return "", fmt.Errorf("postgres store: read serialized token: %w", err)
 		}
 	case auth.Metadata != nil:
+		auth.Metadata = persistedAuthMetadata(auth)
 		raw, err = json.Marshal(auth.Metadata)
 		if err != nil {
 			return "", fmt.Errorf("postgres store: marshal metadata: %w", err)

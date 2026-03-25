@@ -24,6 +24,36 @@ type FileTokenStore struct {
 	baseDir string
 }
 
+func persistedAuthMetadata(auth *cliproxyauth.Auth) map[string]any {
+	if auth == nil {
+		return nil
+	}
+	meta := make(map[string]any, len(auth.Metadata)+3)
+	for key, value := range auth.Metadata {
+		meta[key] = value
+	}
+	meta["disabled"] = auth.Disabled
+	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
+		meta["prefix"] = prefix
+	} else {
+		delete(meta, "prefix")
+	}
+	if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
+		meta["proxy_url"] = proxyURL
+	} else {
+		delete(meta, "proxy_url")
+	}
+	return meta
+}
+
+func authMetadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
+}
+
 // NewFileTokenStore creates a token store that saves credentials to disk through the
 // TokenStorage implementation embedded in the token record.
 func NewFileTokenStore() *FileTokenStore {
@@ -72,13 +102,13 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 	switch {
 	case auth.Storage != nil:
 		if setter, ok := auth.Storage.(metadataSetter); ok {
-			setter.SetMetadata(auth.Metadata)
+			setter.SetMetadata(persistedAuthMetadata(auth))
 		}
 		if err = auth.Storage.SaveTokenToFile(path); err != nil {
 			return "", err
 		}
 	case auth.Metadata != nil:
-		auth.Metadata["disabled"] = auth.Disabled
+		auth.Metadata = persistedAuthMetadata(auth)
 		raw, errMarshal := json.Marshal(auth.Metadata)
 		if errMarshal != nil {
 			return "", fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
@@ -243,6 +273,8 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 		Label:            s.labelFor(metadata),
 		Status:           status,
 		Disabled:         disabled,
+		Prefix:           authMetadataString(metadata, "prefix"),
+		ProxyURL:         authMetadataString(metadata, "proxy_url"),
 		Attributes:       map[string]string{"path": path},
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),

@@ -831,6 +831,11 @@ func applyClaudeHeaders(r *http.Request, auth *cliproxyauth.Auth, apiKey string,
 	if ginCtx, ok := r.Context().Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
 		ginHeaders = ginCtx.Request.Header
 	}
+	stabilizeDeviceProfile := claudeDeviceProfileStabilizationEnabled(cfg)
+	var deviceProfile claudeDeviceProfile
+	if stabilizeDeviceProfile {
+		deviceProfile = resolveClaudeDeviceProfile(auth, apiKey, ginHeaders, cfg)
+	}
 
 	baseBetas := "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05"
 	if val := strings.TrimSpace(ginHeaders.Get("Anthropic-Beta")); val != "" {
@@ -874,25 +879,9 @@ func applyClaudeHeaders(r *http.Request, auth *cliproxyauth.Auth, apiKey string,
 	misc.EnsureHeader(r.Header, ginHeaders, "X-App", "cli")
 	// Values below match Claude Code 2.1.63 / @anthropic-ai/sdk 0.74.0 (updated 2026-02-28).
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Retry-Count", "0")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Runtime-Version", hdrDefault(hd.RuntimeVersion, "v24.3.0"))
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Package-Version", hdrDefault(hd.PackageVersion, "0.74.0"))
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Runtime", "node")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Lang", "js")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Arch", mapStainlessArch())
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Os", mapStainlessOS())
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Stainless-Timeout", hdrDefault(hd.Timeout, "600"))
-	// For User-Agent, only forward the client's header if it's already a Claude Code client.
-	// Non-Claude-Code clients (e.g. curl, OpenAI SDKs) get the default Claude Code User-Agent
-	// to avoid leaking the real client identity during cloaking.
-	clientUA := ""
-	if ginHeaders != nil {
-		clientUA = ginHeaders.Get("User-Agent")
-	}
-	if isClaudeCodeClient(clientUA) {
-		r.Header.Set("User-Agent", clientUA)
-	} else {
-		r.Header.Set("User-Agent", hdrDefault(hd.UserAgent, "claude-cli/2.1.63 (external, cli)"))
-	}
 	r.Header.Set("Connection", "keep-alive")
 	if stream {
 		r.Header.Set("Accept", "text/event-stream")
@@ -904,13 +893,16 @@ func applyClaudeHeaders(r *http.Request, auth *cliproxyauth.Auth, apiKey string,
 		r.Header.Set("Accept", "application/json")
 		r.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	}
-	// Keep OS/Arch mapping dynamic (not configurable).
-	// They intentionally continue to derive from runtime.GOOS/runtime.GOARCH.
 	var attrs map[string]string
 	if auth != nil {
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(r, attrs)
+	if stabilizeDeviceProfile {
+		applyClaudeDeviceProfileHeaders(r, deviceProfile)
+	} else {
+		applyClaudeLegacyDeviceHeaders(r, ginHeaders, cfg)
+	}
 	// Re-enforce Accept-Encoding: identity after ApplyCustomHeadersFromAttrs, which
 	// may override it with a user-configured value. Compressed SSE breaks the line
 	// scanner regardless of user preference, so this is non-negotiable for streams.

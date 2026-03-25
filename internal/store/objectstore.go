@@ -17,9 +17,9 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	log "github.com/sirupsen/logrus"
 	"proxycore/api/v6/internal/misc"
 	cliproxyauth "proxycore/api/v6/sdk/cliproxy/auth"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -184,10 +184,17 @@ func (s *ObjectTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (s
 
 	switch {
 	case auth.Storage != nil:
+		type metadataSetter interface {
+			SetMetadata(map[string]any)
+		}
+		if setter, ok := auth.Storage.(metadataSetter); ok {
+			setter.SetMetadata(persistedAuthMetadata(auth))
+		}
 		if err = auth.Storage.SaveTokenToFile(path); err != nil {
 			return "", err
 		}
 	case auth.Metadata != nil:
+		auth.Metadata = persistedAuthMetadata(auth)
 		raw, errMarshal := json.Marshal(auth.Metadata)
 		if errMarshal != nil {
 			return "", fmt.Errorf("object store: marshal metadata: %w", errMarshal)
@@ -582,12 +589,20 @@ func (s *ObjectTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Aut
 	if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 		attr["email"] = email
 	}
+	disabled, _ := metadata["disabled"].(bool)
+	status := cliproxyauth.StatusActive
+	if disabled {
+		status = cliproxyauth.StatusDisabled
+	}
 	auth := &cliproxyauth.Auth{
 		ID:               rel,
 		Provider:         provider,
 		FileName:         rel,
 		Label:            labelFor(metadata),
-		Status:           cliproxyauth.StatusActive,
+		Status:           status,
+		Disabled:         disabled,
+		Prefix:           strings.TrimSpace(valueAsString(metadata["prefix"])),
+		ProxyURL:         strings.TrimSpace(valueAsString(metadata["proxy_url"])),
 		Attributes:       attr,
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),
