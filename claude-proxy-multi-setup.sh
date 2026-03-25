@@ -181,15 +181,6 @@ remote-management:
   disable-control-panel: false
 
 usage-statistics-enabled: true
-
-claude-header-defaults:
-  user-agent: "claude-cli/2.1.63 (external, cli)"
-  package-version: "0.74.0"
-  runtime-version: "v24.3.0"
-  os: "MacOS"
-  arch: "arm64"
-  timeout: "600"
-  stabilize-device-profile: true
 EOF
     else
         cat > "${install_dir}/config.yaml" << EOF
@@ -213,15 +204,6 @@ remote-management:
   disable-control-panel: false
 
 usage-statistics-enabled: true
-
-claude-header-defaults:
-  user-agent: "claude-cli/2.1.63 (external, cli)"
-  package-version: "0.74.0"
-  runtime-version: "v24.3.0"
-  os: "MacOS"
-  arch: "arm64"
-  timeout: "600"
-  stabilize-device-profile: true
 EOF
     fi
 
