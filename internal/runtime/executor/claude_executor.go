@@ -188,16 +188,12 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		// Decompress error responses (e.g. gzip-compressed 400 errors from Anthropic API).
-		errBody := httpResp.Body
-		if ce := httpResp.Header.Get("Content-Encoding"); ce != "" {
-			var decErr error
-			errBody, decErr = decodeResponseBody(httpResp.Body, ce)
-			if decErr != nil {
-				recordAPIResponseError(ctx, e.cfg, decErr)
-				msg := fmt.Sprintf("failed to decode error response body (encoding=%s): %v", ce, decErr)
-				logWithRequestID(ctx).Warn(msg)
-				return resp, statusErr{code: httpResp.StatusCode, msg: msg}
-			}
+		errBody, decErr := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
+		if decErr != nil {
+			recordAPIResponseError(ctx, e.cfg, decErr)
+			msg := fmt.Sprintf("failed to decode error response body: %v", decErr)
+			logWithRequestID(ctx).Warn(msg)
+			return resp, statusErr{code: httpResp.StatusCode, msg: msg}
 		}
 		b, readErr := io.ReadAll(errBody)
 		if readErr != nil {
@@ -354,16 +350,12 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		// Decompress error responses (e.g. gzip-compressed 400 errors from Anthropic API).
-		errBody := httpResp.Body
-		if ce := httpResp.Header.Get("Content-Encoding"); ce != "" {
-			var decErr error
-			errBody, decErr = decodeResponseBody(httpResp.Body, ce)
-			if decErr != nil {
-				recordAPIResponseError(ctx, e.cfg, decErr)
-				msg := fmt.Sprintf("failed to decode error response body (encoding=%s): %v", ce, decErr)
-				logWithRequestID(ctx).Warn(msg)
-				return nil, statusErr{code: httpResp.StatusCode, msg: msg}
-			}
+		errBody, decErr := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
+		if decErr != nil {
+			recordAPIResponseError(ctx, e.cfg, decErr)
+			msg := fmt.Sprintf("failed to decode error response body: %v", decErr)
+			logWithRequestID(ctx).Warn(msg)
+			return nil, statusErr{code: httpResp.StatusCode, msg: msg}
 		}
 		b, readErr := io.ReadAll(errBody)
 		if readErr != nil {
@@ -525,16 +517,12 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	recordAPIResponseMetadata(ctx, e.cfg, resp.StatusCode, resp.Header.Clone())
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Decompress error responses (e.g. gzip-compressed 400 errors from Anthropic API).
-		errBody := resp.Body
-		if ce := resp.Header.Get("Content-Encoding"); ce != "" {
-			var decErr error
-			errBody, decErr = decodeResponseBody(resp.Body, ce)
-			if decErr != nil {
-				recordAPIResponseError(ctx, e.cfg, decErr)
-				msg := fmt.Sprintf("failed to decode error response body (encoding=%s): %v", ce, decErr)
-				logWithRequestID(ctx).Warn(msg)
-				return cliproxyexecutor.Response{}, statusErr{code: resp.StatusCode, msg: msg}
-			}
+		errBody, decErr := decodeResponseBody(resp.Body, resp.Header.Get("Content-Encoding"))
+		if decErr != nil {
+			recordAPIResponseError(ctx, e.cfg, decErr)
+			msg := fmt.Sprintf("failed to decode error response body: %v", decErr)
+			logWithRequestID(ctx).Warn(msg)
+			return cliproxyexecutor.Response{}, statusErr{code: resp.StatusCode, msg: msg}
 		}
 		b, readErr := io.ReadAll(errBody)
 		if readErr != nil {
